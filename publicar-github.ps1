@@ -8,6 +8,9 @@
 #
 # La carpeta del repositorio queda idéntica a esta (archivos nuevos, modificados y borrados).
 # NUNCA se sube data.json (contiene el PIN de administrador y los datos del servidor local).
+# Un mensaje de VARIAS líneas no puede pasarse con "powershell -File ..." (se parte en argumentos);
+# llámalo desde una consola de PowerShell:  & .\publicar-github.ps1 -Mensaje $texto
+[CmdletBinding(PositionalBinding = $false)]
 param(
   [string]$Repo = 'audictore/demoday',
   [string]$Rama = 'main',

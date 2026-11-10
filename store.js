@@ -51,6 +51,11 @@
         onChange: (cb) => { cb({ email: 'modo-demostracion' }); return () => {}; },
         signIn: async () => {}, signOut: async () => {},
       },
+      // scope 'responses': solo evaluaciones y votos (conserva equipos y ajustes). 'all': todo.
+      clearData: async (scope) => {
+        const keys = scope === 'responses' ? ['evals', 'votes'] : Object.keys(K);
+        keys.forEach((k) => localStorage.removeItem(K[k])); keys.forEach(emit);
+      },
       resetLocal: async () => { Object.values(K).forEach((k) => localStorage.removeItem(k)); Object.keys(K).forEach(emit); },
     };
   }
@@ -65,18 +70,31 @@
   }
 
   function createFirebase() {
-    let db, auth;
+    let db, auth, ready = null;
     const col = (n) => db.collection(n);
     const docs = (snap) => snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+    const wipe = async (name) => {
+      const snap = await col(name).get();
+      for (let i = 0; i < snap.docs.length; i += 400) {
+        const b = db.batch();
+        snap.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref));
+        await b.commit();
+      }
+    };
     return {
       mode: 'firebase',
-      init: async () => {
+      // init se puede llamar muchas veces (cada vista lo hace): solo inicializa una vez.
+      init: () => ready || (ready = (async () => {
         const base = `https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
         await loadScript(base + 'firebase-app-compat.js');
         await Promise.all([loadScript(base + 'firebase-auth-compat.js'), loadScript(base + 'firebase-firestore-compat.js')]);
         firebase.initializeApp(cfg);
         db = firebase.firestore();
         auth = firebase.auth();
+      })().catch((e) => { ready = null; throw e; })),
+      clearData: async (scope) => {
+        await wipe('evaluations'); await wipe('votes');
+        if (scope !== 'responses') { await wipe('teams'); await col('settings').doc('event').delete(); }
       },
       onTeams: (cb) => col('teams').onSnapshot((s) => cb(docs(s)), (e) => console.error('teams', e)),
       onEvaluations: (cb, onErr) => col('evaluations').onSnapshot((s) => cb(docs(s)), onErr || ((e) => console.error('evaluations', e))),
@@ -190,6 +208,7 @@
       saveTeams: (list) => withKick(api('POST', 'teams/bulk', list, true)),
       deleteTeam: (id) => withKick(api('DELETE', 'teams/' + id, undefined, true)),
       saveSettings: (p) => withKick(api('PUT', 'settings', p, true)),
+      clearData: (scope) => withKick(api('POST', 'reset?scope=' + (scope === 'responses' ? 'responses' : 'all'), {}, true)),
       resetLocal: () => withKick(api('POST', 'reset', {}, true)),
       auth: {
         onChange: (cb) => {

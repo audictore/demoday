@@ -1,4 +1,4 @@
-# Servidor de red local del Demo Day (sin Node, sin Python, sin internet).
+﻿# Servidor de red local del Demo Day (sin Node, sin Python, sin internet).
 # Sirve la página y guarda evaluaciones/votos en data.json para que TODOS los celulares
 # conectados a la misma red (Wi-Fi o "Zona con cobertura inalámbrica" de Windows) compartan los datos.
 #
@@ -146,7 +146,9 @@ function Handle-Api($stream, $req, $segs) {
     }
     'POST reset' {
       if (& $needAdmin) { return }
-      $db.teams = @{}; $db.evals = @{}; $db.votes = @{}; $db.settings = @{}; Save-Db; SendJson $stream 200 @{ ok = $true }; return
+      $db.evals = @{}; $db.votes = @{}
+      if ($req.query -notmatch 'scope=responses') { $db.teams = @{}; $db.settings = @{} }
+      Save-Db; SendJson $stream 200 @{ ok = $true }; return
     }
   }
   Fail $stream 404 'Ruta no encontrada'

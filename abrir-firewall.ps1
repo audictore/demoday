@@ -1,4 +1,4 @@
-# Abre el puerto del servidor del Demo Day en el Firewall de Windows (todas las redes).
+﻿# Abre el puerto del servidor del Demo Day en el Firewall de Windows (todas las redes).
 # Solo hace falta una vez. Pide permisos de administrador (aparece el aviso de Windows).
 # Uso:  powershell -ExecutionPolicy Bypass -File abrir-firewall.ps1 [-Port 8080]
 param([int]$Port = 8080)

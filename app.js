@@ -16,6 +16,21 @@
   // `short`: texto reducido que se usa en pantallas muy angostas.
   const statusPill = (tone, label, pulse, short) => `<span class="status ${tone}${pulse ? ' pulse' : ''}"><i></i>${short
     ? `<span class="full">${esc(label)}</span><span class="short">${esc(short)}</span>` : esc(label)}</span>`;
+  /** Aviso de envío pendiente (sin señal). Pasa a «Enviada» solo cuando la cola de reintentos lo entrega. */
+  const queuedNoteHtml = (res, noun) => (res.status === 'queued'
+    ? `<div class="banner" id="queuedNote">${statusPill('warn', 'Pendiente de enviar')} Sin señal: tu ${noun} quedó guardad${noun === 'evaluación' ? 'a' : 'o'} en este teléfono y se enviará solo en cuanto vuelva la conexión. Puedes dejar esta página abierta o volver a abrir el sitio más tarde.</div>` : '');
+  function watchQueued(res, kind, id, noun) {
+    if (res.status !== 'queued') return;
+    const off = window.DD.outbox.onChange(() => {
+      if (window.DD.outbox.has(kind, id)) return;
+      const el = $('#queuedNote');
+      if (el) { el.className = 'banner info'; el.innerHTML = `${statusPill('on', 'Enviado')} Tu ${esc(noun)} ya llegó. ¡Gracias!`; }
+      off();
+    });
+    onLeave(off);
+  }
+  const pendingBannerHtml = () => (window.DD.outbox && window.DD.outbox.pending()
+    ? `<div class="banner">${statusPill('warn', 'Pendiente')} Tienes ${window.DD.outbox.pending()} envío(s) guardado(s) sin enviar; se reintentan solos.</div>` : '');
   const brandbar = (text) => `<div class="brandbar">${logoImg('sm')}<span>${esc(text)}</span></div>`;
   const stateScreen = (tone, icon, title, text) => `
     <div class="wrap narrow"><div class="card center state">
@@ -185,6 +200,7 @@
     app.innerHTML = `
       <div class="wrap narrow">
         ${brandbar(settings.eventName + ' · Evaluación')}
+        ${pendingBannerHtml()}
         <section class="card team-card">
           <span class="chip">${esc(team.category || 'Sin categoría')}</span>
           <h1>${esc(team.name)}</h1>
@@ -307,22 +323,24 @@
       FEEDBACK.forEach((f) => { ev[f.id] = form.elements['f_' + f.id].value.trim(); });
       const btn = $('#sendBtn'); btn.disabled = true; btn.textContent = 'Enviando…';
       try {
-        await store.saveEvaluation(ev);
+        const res = await window.DD.outbox.submit('eval', ev);
         safeLS.set('dd_judge', { name, email });
         const saved2 = ev;
         app.innerHTML = `
           <div class="wrap narrow"><div class="card center done">
             <div class="check">✓</div>
-            <h2>¡Evaluación registrada!</h2>
+            <h2>${res.status === 'queued' ? 'Evaluación guardada' : '¡Evaluación registrada!'}</h2>
+            ${queuedNoteHtml(res, 'evaluación')}
             <p><b>${esc(team.name)}</b><br>Tu puntaje: <b>${saved2.total}/100</b></p>
             <p class="muted">Gracias, ${esc(name)}. Puedes pasar al siguiente stand y escanear su código QR.</p>
             <button class="btn ghost" id="editAgain">Editar mi evaluación</button>
           </div></div>`;
         $('#editAgain').onclick = () => viewEval(teamId);
+        watchQueued(res, 'eval', ev.id, 'evaluación');
         window.scrollTo(0, 0);
       } catch (ex) {
         btn.disabled = false; btn.textContent = 'Enviar evaluación';
-        err.textContent = 'No se pudo enviar: ' + ex.message + '. Revisa tu conexión e inténtalo de nuevo.'; err.hidden = false;
+        err.textContent = 'No se pudo enviar: ' + ex.message + '.'; err.hidden = false;
       }
     });
   }
@@ -352,6 +370,7 @@
     app.innerHTML = `
       <div class="wrap narrow">
         ${brandbar(settings.eventName + ' · Premio del Público')}
+        ${pendingBannerHtml()}
         <form id="voteForm">
           <section class="card">
             <h1>Vota por tu proyecto favorito</h1>
@@ -386,16 +405,19 @@
       const btn = $('#voteBtn'); btn.disabled = true; btn.textContent = 'Enviando…';
       const now = Date.now();
       try {
-        await store.saveVote({ id: voterId, voterId, teamId: r.value, createdAt: (current && current.createdAt) || now, updatedAt: now });
+        const vote = { id: voterId, voterId, teamId: r.value, createdAt: (current && current.createdAt) || now, updatedAt: now };
+        const res = await window.DD.outbox.submit('vote', vote);
         const t = teams.find((x) => x.id === r.value);
         app.innerHTML = `
           <div class="wrap narrow"><div class="card center done">
-            <div class="check">✓</div><h2>¡Voto registrado!</h2>
+            <div class="check">✓</div><h2>${res.status === 'queued' ? 'Voto guardado' : '¡Voto registrado!'}</h2>
+            ${queuedNoteHtml(res, 'voto')}
             <p>Votaste por <b>${esc(t.name)}</b></p>
             <p class="muted">Gracias por participar en el Premio del Público.</p>
             <button class="btn ghost" id="changeVote">Cambiar mi voto</button>
           </div></div>`;
         $('#changeVote').onclick = () => viewVoto();
+        watchQueued(res, 'vote', vote.id, 'voto');
         window.scrollTo(0, 0);
       } catch (ex) {
         btn.disabled = false; btn.textContent = 'Enviar voto';
@@ -1157,20 +1179,30 @@
             <p>${store.mode === 'firebase' ? 'Conectado a Firebase: los datos se comparten en tiempo real con todos los dispositivos.'
               : store.mode === 'server' ? 'Servidor de red local: los datos se guardan en <code>data.json</code> (junto a serve.ps1) y se comparten con los celulares de esta red.'
                 : 'Modo demostración: los datos están solo en este navegador.'}</p>
-            ${store.mode !== 'firebase' ? `<div class="row"><button class="btn" id="seedBtn">Cargar datos de demostración</button><button class="btn danger" id="resetBtn">Borrar todo</button></div>` : ''}
+            <div class="row">
+              ${store.mode !== 'firebase' ? '<button class="btn" id="seedBtn">Cargar datos de demostración</button>' : ''}
+              <button class="btn danger" id="clearRespBtn">Borrar evaluaciones y votos</button>
+              <button class="btn danger" id="resetBtn">Borrar todo</button>
+            </div>
+            <p class="muted">«Borrar evaluaciones y votos» conserva los equipos y sus QR: úsalo después de las pruebas, antes del evento. «Borrar todo» también elimina los equipos y los ajustes.</p>
           </section>`;
         $('#ajForm').onsubmit = async (e) => {
           e.preventDefault(); const f = e.target;
           try { await store.saveSettings({ eventName: f.eventName.value.trim() || 'Demo Day 2026', baseUrl: f.baseUrl.value.trim(), open: f.open.checked, votingOpen: f.votingOpen.checked }); toast('Ajustes guardados'); }
           catch (ex) { toast(ex.message, 'bad'); }
         };
-        if (store.mode !== 'firebase') {
-          $('#seedBtn').onclick = async () => { await window.DD.seedDemo(); toast('Datos de demostración cargados'); };
-          $('#resetBtn').onclick = async () => {
-            const where = store.mode === 'server' ? 'del servidor' : 'de este navegador';
-            if (await confirmDialog(`¿Borrar equipos, evaluaciones, votos y ajustes ${where}? No se puede deshacer.`, 'Borrar todo')) { await store.resetLocal(); toast('Datos borrados'); }
-          };
-        }
+        if (store.mode !== 'firebase') $('#seedBtn').onclick = async () => { await window.DD.seedDemo(); toast('Datos de demostración cargados'); };
+        const where = store.mode === 'firebase' ? 'de Firebase' : store.mode === 'server' ? 'del servidor' : 'de este navegador';
+        const run = async (scope, okMsg) => {
+          try { await store.clearData(scope); toast(okMsg); } catch (ex) { toast('No se pudo borrar: ' + ex.message, 'bad'); }
+        };
+        $('#clearRespBtn').onclick = async () => {
+          const ne = state.evals.length, nv = state.votes.length;
+          if (await confirmDialog(`¿Borrar ${ne} ${ne === 1 ? 'evaluación' : 'evaluaciones'} y ${nv} ${nv === 1 ? 'voto' : 'votos'} ${where}? Los equipos y sus QR se conservan. No se puede deshacer.`, 'Borrar')) await run('responses', 'Evaluaciones y votos borrados');
+        };
+        $('#resetBtn').onclick = async () => {
+          if (await confirmDialog(`¿Borrar TODO ${where}: equipos, evaluaciones, votos y ajustes? Los QR impresos dejarán de funcionar. No se puede deshacer.`, 'Borrar todo')) await run('all', 'Todos los datos borrados');
+        };
       },
     };
   }

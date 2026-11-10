@@ -69,9 +69,32 @@ Re-importar el mismo Excel actualiza los equipos existentes (mismo proyecto + gr
 - Tras el recorrido: **Ajustes → desmarcar «Evaluaciones de jueces abiertas»**. Tras los 20 min de votación del público: desmarcar **«Votación del público abierta»**. **Jueces → Exportar CSV** descarga todo.
 - Si cambias `firestore.rules`, vuelve a **publicarlas** en Firebase (incluyen la colección `votes` del voto del público).
 
+## Antes del evento: limpiar las pruebas
+
+En **Ajustes → Datos** (funciona en los tres modos: Firebase, servidor local y demostración):
+- **Borrar evaluaciones y votos:** deja los equipos, los QR impresos y los ajustes. Es lo que debes hacer después de probar, justo antes de abrir el evento real.
+- **Borrar todo:** elimina además equipos y ajustes (los QR impresos dejan de servir).
+
+Los dos botones piden confirmación y muestran cuántos registros se borrarán.
+
+## Si un celular pierde la señal
+
+Cuando un juez o alguien del público envía una evaluación o un voto y no hay conexión, el envío **se guarda en su teléfono** y se reintenta solo (cada 6 segundos, al volver la señal y al reabrir el sitio). La pantalla muestra «Pendiente de enviar» y cambia a «Enviado» cuando llega. Es seguro reintentar: cada evaluación y voto tiene un identificador fijo, así que un reenvío solo lo sobrescribe. Si el servidor lo rechaza (por ejemplo, evaluaciones cerradas), no se reintenta y se avisa.
+
+## Publicar cambios en GitHub
+
+`publicar-github.ps1` deja el repositorio idéntico a esta carpeta usando la API de GitHub (sirve aunque `git push` esté bloqueado). Requiere `gh auth login` una sola vez:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File publicar-github.ps1 -SoloVer      # lista los cambios, sin subir
+powershell -ExecutionPolicy Bypass -File publicar-github.ps1 -Mensaje "Qué cambió"
+```
+
+Nunca sube `data.json`. GitHub Pages se actualiza en ~1 minuto.
+
 ## Archivos
 
-`index.html` · `app.js` (interfaz) · `analytics.js` (promedios, mejoras, ganadores) · `rubric.js` (rúbrica y preguntas, editable) · `store.js` (Firebase / modo local) · `styles.css` · `demo.js` · `firestore.rules` · `serve.ps1` · `vendor/` (QR y lector de Excel, incluidos localmente).
+`index.html` · `app.js` (interfaz) · `analytics.js` (promedios, mejoras, ganadores) · `rubric.js` (rúbrica y preguntas, editable) · `store.js` (Firebase / servidor local / demostración) · `outbox.js` (cola de reintentos) · `styles.css` · `demo.js` · `firestore.rules` · `serve.ps1` · `abrir-firewall.ps1` · `publicar-github.ps1` · `vendor/` (QR y lector de Excel, incluidos localmente) · `assets/` (logo e íconos).
 
 ## Límites conocidos
 

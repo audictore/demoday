@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Cualquier usuario autenticado = administrador.
+    // Solo crea usuarios manualmente (Authentication → Usuarios) y deja desactivados los demás proveedores.
+    function isAdmin() {
+      return request.auth != null;
+    }
+
+    function eventOpen() {
+      return !exists(/databases/$(database)/documents/settings/event)
+        || get(/databases/$(database)/documents/settings/event).data.get('open', true) == true;
+    }
+
+    function votingOpen() {
+      return !exists(/databases/$(database)/documents/settings/event)
+        || get(/databases/$(database)/documents/settings/event).data.get('votingOpen', true) == true;
+    }
+
+    function validEvaluation() {
+      let d = request.resource.data;
+      return eventOpen()
+        && d.total is number && d.total >= 0 && d.total <= 100        && d.teamId is string
+        && request.resource.id.matches(d.teamId + '__.*')
+        && d.judgeName is string && d.judgeName.size() > 0 && d.judgeName.size() < 120
+        && d.judgeEmail is string && d.judgeEmail.size() < 200
+        && d.scores is map;
+    }
+
+    match /teams/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Voto del público: un documento por dispositivo (id = identificador aleatorio guardado en el navegador).
+    match /votes/{id} {
+      allow get: if true;
+      allow list, delete: if isAdmin();
+      allow create, update: if votingOpen()
+        && id.size() >= 8 && id.size() <= 64
+        && request.resource.data.voterId == id
+        && request.resource.data.teamId is string
+        && exists(/databases/$(database)/documents/teams/$(request.resource.data.teamId));
+    }
+
+    match /evaluations/{id} {
+      // Un juez puede leer SU evaluación (conoce el id) para editarla, pero nadie puede listarlas salvo el admin.
+      allow get: if true;
+      allow list, delete: if isAdmin();
+      allow create, update: if validEvaluation();
+    }
+  }
+}

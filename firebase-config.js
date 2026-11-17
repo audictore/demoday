@@ -1,11 +1,11 @@
-/* Pega aquí la configuración de tu app web de Firebase
-   (Consola Firebase → Configuración del proyecto → Tus apps → Web → "Config").
-   Mientras esté vacío, el sistema funciona en MODO DEMOSTRACIÓN (datos solo en este navegador). */
+/* Configuración de la app web de Firebase (proyecto "Evaluador admin").
+   Estas claves NO son secretas: identifican el proyecto; la seguridad la dan las reglas de Firestore (firestore.rules).
+   Si se vacían, el sistema vuelve al MODO DEMOSTRACIÓN (datos solo en este navegador). */
 window.FIREBASE_CONFIG = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: 'AIzaSyCgK5H47FOs3_G0h1Hfwj3h3PozeGoXj0k',
+  authDomain: 'evaluador-admin.firebaseapp.com',
+  projectId: 'evaluador-admin',
+  storageBucket: 'evaluador-admin.firebasestorage.app',
+  messagingSenderId: '408785133730',
+  appId: '1:408785133730:web:754f4073bc0f0e6e7277fb',
 };

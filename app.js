@@ -144,7 +144,7 @@
           <p class="muted">Sistema de evaluación por código QR</p>
           <p><b>Jueces:</b> escaneen el código QR del stand del equipo que van a evaluar.</p>
           <p><b>Público:</b> escanea el QR general para votar por tu proyecto favorito.</p>
-          <p><a class="btn" href="#/voto">Votar como público</a> <a class="btn primary" href="#/admin">Acceso de administrador</a></p>
+          <p><a class="btn primary" href="#/admin">Acceso de administrador</a></p>
           ${store.mode === 'local' ? '<p class="note">Modo demostración: los datos viven solo en este navegador. Configura <code>firebase-config.js</code> para usarlo en el evento.</p>' : ''}
         </div>
       </div>`;
@@ -162,7 +162,9 @@
       return;
     }
     if (!team) {
-      app.innerHTML = stateScreen('bad', '?', 'Proyecto no encontrado', 'Este código QR no corresponde a ningún equipo registrado. Avisa a los organizadores.');
+      app.innerHTML = store.mode === 'local'
+        ? stateScreen('warn', '!', 'Sistema en modo demostración', 'Esta página todavía no está conectada a una base de datos compartida, así que este teléfono no conoce al equipo. Avisa a los organizadores.')
+        : stateScreen('bad', '?', 'Proyecto no encontrado', 'Este código QR no corresponde a ningún equipo registrado. Avisa a los organizadores.');
       return;
     }
     if (!settings.open) {
@@ -358,6 +360,12 @@
     }
     if (!settings.votingOpen) {
       app.innerHTML = stateScreen('off', '🔒', 'Votación cerrada', `La votación del público de ${esc(settings.eventName)} ya terminó. ¡Gracias por participar!`);
+      return;
+    }
+    if (!teams.length) {
+      app.innerHTML = store.mode === 'local'
+        ? stateScreen('warn', '!', 'Sistema en modo demostración', 'Esta página todavía no está conectada a una base de datos compartida, así que no hay proyectos para votar. Avisa a los organizadores.')
+        : stateScreen('off', '…', 'Aún no hay proyectos', 'Todavía no se registran proyectos para votar. Inténtalo de nuevo en unos minutos.');
       return;
     }
     let voterId = safeLS.get('dd_voter');

@@ -18,11 +18,12 @@ service cloud.firestore {
         || get(/databases/$(database)/documents/settings/event).data.get('votingOpen', true) == true;
     }
 
-    function validEvaluation() {
+    function validEvaluation(id) {
       let d = request.resource.data;
       return eventOpen()
-        && d.total is number && d.total >= 0 && d.total <= 100        && d.teamId is string
-        && request.resource.id.matches(d.teamId + '__.*')
+        && d.total is number && d.total >= 0 && d.total <= 100
+        && d.teamId is string
+        && id.matches(d.teamId + '__.*')
         && d.judgeName is string && d.judgeName.size() > 0 && d.judgeName.size() < 120
         && d.judgeEmail is string && d.judgeEmail.size() < 200
         && d.scores is map;
@@ -53,7 +54,7 @@ service cloud.firestore {
       // Un juez puede leer SU evaluación (conoce el id) para editarla, pero nadie puede listarlas salvo el admin.
       allow get: if true;
       allow list, delete: if isAdmin();
-      allow create, update: if validEvaluation();
+      allow create, update: if validEvaluation(id);
     }
   }
 }

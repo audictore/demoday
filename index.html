@@ -16,7 +16,7 @@
 <body>
   <div id="app"></div>
   <footer class="site-footer">
-    <img class="logo" src="assets/logo.png" alt="Logo de la carrera de Administración" width="440" height="400">
+    <img class="logo" src="assets/logo-sm.png" alt="Logo de la carrera de Administración" width="176" height="160">
     <p>Realizado por <b>Alonzo Lara Flores</b></p>
     <button class="theme-btn" id="themeBtn" type="button" aria-label="Cambiar entre tema claro y oscuro">
       <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
@@ -24,14 +24,12 @@
       <span class="label">Tema oscuro</span>
     </button>
   </footer>
-  <script src="vendor/qrcode.min.js"></script>
-  <script src="vendor/xlsx.full.min.js"></script>
+  <!-- QR, lector de Excel, datos de demostración y Firebase se cargan solo cuando hacen falta (ver app.js y store.js). -->
   <script src="firebase-config.js"></script>
   <script src="rubric.js"></script>
   <script src="analytics.js"></script>
   <script src="store.js"></script>
   <script src="outbox.js"></script>
-  <script src="demo.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

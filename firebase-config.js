@@ -9,3 +9,5 @@ window.FIREBASE_CONFIG = {
   messagingSenderId: '408785133730',
   appId: '1:408785133730:web:754f4073bc0f0e6e7277fb',
 };
+// Dirección publicada: los QR la usan aunque el panel se abra desde localhost.
+window.PUBLIC_URL = 'https://audictore.github.io/demoday/';

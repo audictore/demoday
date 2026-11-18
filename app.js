@@ -3,7 +3,7 @@
   const { RUBRIC, NOMINATIONS, FEEDBACK, CATEGORIES, AWARDS } = window.DD;
   const A = window.DD.analytics;
   const store = window.DD.store;
-  const { judgeKeyOf, evalId, newId } = window.DD.util;
+  const { judgeKeyOf, evalId, newId, loadScript } = window.DD.util;
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -12,7 +12,10 @@
   const pct = (p) => Math.round(p * 100) + '%';
   const newVoterId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : newId() + newId() + newId() + newId());
   const teamLine = (t) => [t.group, t.category].filter(Boolean).join(' · ');
-  const logoImg = (cls = '') => `<img class="logo ${cls}" src="assets/logo.png" alt="Logo de la carrera de Administración" width="440" height="400">`;
+  // El logo grande solo se usa en el inicio; el resto de las vistas usa la versión ligera.
+  const logoImg = (cls = '') => (cls === 'lg'
+    ? '<img class="logo lg" src="assets/logo.png" alt="Logo de la carrera de Administración" width="320" height="291">'
+    : `<img class="logo ${cls}" src="assets/logo-sm.png" alt="Logo de la carrera de Administración" width="176" height="160">`);
   // `short`: texto reducido que se usa en pantallas muy angostas.
   const statusPill = (tone, label, pulse, short) => `<span class="status ${tone}${pulse ? ' pulse' : ''}"><i></i>${short
     ? `<span class="full">${esc(label)}</span><span class="short">${esc(short)}</span>` : esc(label)}</span>`;
@@ -106,12 +109,15 @@
   }
 
   const isLocalUrl = (u) => /^file:|\/\/(localhost|127\.0\.0\.1)/.test(u);
-  // En modo servidor local, si el admin abrió la página como "localhost", los QR usan automáticamente la IP de la red
-  // (un celular no puede abrir "localhost": sería él mismo).
+  // Un celular no puede abrir "localhost" (sería él mismo): si el admin abrió la página así, los QR usan
+  // la dirección publicada (Firebase) o la IP de la red (servidor local).
   const baseUrl = (settings) => {
     const cfg = settings.baseUrl || location.href.split('#')[0];
     const info = store.serverInfo;
-    if (!settings.baseUrl && info && info.ips && info.ips.length && isLocalUrl(cfg)) return `http://${info.ips[0]}:${info.port}/`;
+    if (!settings.baseUrl && isLocalUrl(cfg)) {
+      if (store.mode === 'firebase' && window.PUBLIC_URL) return window.PUBLIC_URL;
+      if (info && info.ips && info.ips.length) return `http://${info.ips[0]}:${info.port}/`;
+    }
     return cfg.replace(/#.*$/, '');
   };
   const teamUrl = (settings, team) => `${baseUrl(settings)}#/e/${team.id}`;
@@ -445,7 +451,7 @@
   async function viewAdmin() {
     document.body.classList.add('is-admin');
     app.innerHTML = '<div class="wrap narrow"><div class="card center">Cargando…</div></div>';
-    try { await store.init(); } catch (e) {
+    try { await (store.initAdmin ? store.initAdmin() : store.init()); } catch (e) {
       app.innerHTML = `<div class="wrap narrow"><div class="card"><h2>No se pudo iniciar</h2><p>${esc(e.message)}</p></div></div>`; return;
     }
     const unAuth = store.auth.onChange((user) => { if (user) renderAdminShell(user); else renderLogin(); });
@@ -949,6 +955,7 @@
     $('#eq-file').onchange = async (e) => {
       const f = e.target.files[0]; e.target.value = ''; if (!f) return;
       try {
+        await loadScript('vendor/xlsx.full.min.js');
         const wb = XLSX.read(await f.arrayBuffer(), { type: 'array' });
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
         importDialog(rowsToTeams(rows));
@@ -1059,7 +1066,11 @@
     };
   }
 
-  function qrDialog(t, urlOverride) {
+  const loadQrLib = () => loadScript('vendor/qrcode.min.js')
+    .then(() => true, (ex) => { toast(ex.message + '. Revisa tu conexión.', 'bad'); return false; });
+
+  async function qrDialog(t, urlOverride) {
+    if (!await loadQrLib()) return;
     const url = urlOverride || teamUrl(state.settings, t);
     const svg = qrSvg(url);
     const d = openDialog(`
@@ -1073,8 +1084,8 @@
     $('#dlPng', d).onclick = async () => downloadBlob(`qr-${slug(t.name)}.png`, await svgToPngBlob(svg));
   }
 
-  function printAllQR() {
-    if (!state.teams.length) return;
+  async function printAllQR() {
+    if (!state.teams.length || !await loadQrLib()) return;
     const sheet = document.createElement('div'); sheet.id = 'print-sheet';
     const voteCard = `
       <div class="qr-card"><div class="qr-svg">${qrSvg(voteUrl(state.settings))}</div>
@@ -1199,7 +1210,7 @@
           try { await store.saveSettings({ eventName: f.eventName.value.trim() || 'Demo Day 2026', baseUrl: f.baseUrl.value.trim(), open: f.open.checked, votingOpen: f.votingOpen.checked }); toast('Ajustes guardados'); }
           catch (ex) { toast(ex.message, 'bad'); }
         };
-        if (store.mode !== 'firebase') $('#seedBtn').onclick = async () => { await window.DD.seedDemo(); toast('Datos de demostración cargados'); };
+        if (store.mode !== 'firebase') $('#seedBtn').onclick = async () => { await loadScript('demo.js'); await window.DD.seedDemo(); toast('Datos de demostración cargados'); };
         const where = store.mode === 'firebase' ? 'de Firebase' : store.mode === 'server' ? 'del servidor' : 'de este navegador';
         const run = async (scope, okMsg) => {
           try { await store.clearData(scope); toast(okMsg); } catch (ex) { toast('No se pudo borrar: ' + ex.message, 'bad'); }

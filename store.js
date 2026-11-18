@@ -61,16 +61,23 @@
   }
 
   /* ----------------------------- FIREBASE ---------------------------- */
+  // Carga un script una sola vez; si falla (p. ej. sin señal) se puede volver a intentar.
+  const loadedScripts = {};
   function loadScript(src) {
-    return new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = src; s.onload = res; s.onerror = () => rej(new Error('No se pudo cargar ' + src));
-      document.head.appendChild(s);
-    });
+    if (!loadedScripts[src]) {
+      loadedScripts[src] = new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = src; s.onload = res;
+        s.onerror = () => { delete loadedScripts[src]; s.remove(); rej(new Error('No se pudo cargar ' + src)); };
+        document.head.appendChild(s);
+      });
+    }
+    return loadedScripts[src];
   }
 
   function createFirebase() {
     let db, auth, ready = null;
+    const sdk = (file) => loadScript(`https://www.gstatic.com/firebasejs/${FB_VERSION}/${file}`);
     const col = (n) => db.collection(n);
     const docs = (snap) => snap.docs.map((d) => ({ ...d.data(), id: d.id }));
     const wipe = async (name) => {
@@ -81,17 +88,23 @@
         await b.commit();
       }
     };
+    // init se puede llamar muchas veces (cada vista lo hace): solo inicializa una vez.
+    // Jueces y público solo necesitan Firestore; el inicio de sesión se carga aparte en initAdmin.
+    const init = () => ready || (ready = (async () => {
+      await sdk('firebase-app-compat.js');
+      await sdk('firebase-firestore-compat.js');
+      firebase.initializeApp(cfg);
+      db = firebase.firestore();
+    })().catch((e) => { ready = null; throw e; }));
     return {
       mode: 'firebase',
-      // init se puede llamar muchas veces (cada vista lo hace): solo inicializa una vez.
-      init: () => ready || (ready = (async () => {
-        const base = `https://www.gstatic.com/firebasejs/${FB_VERSION}/`;
-        await loadScript(base + 'firebase-app-compat.js');
-        await Promise.all([loadScript(base + 'firebase-auth-compat.js'), loadScript(base + 'firebase-firestore-compat.js')]);
-        firebase.initializeApp(cfg);
-        db = firebase.firestore();
+      init,
+      initAdmin: async () => {
+        await sdk('firebase-app-compat.js');
+        await sdk('firebase-auth-compat.js');
+        await init();
         auth = firebase.auth();
-      })().catch((e) => { ready = null; throw e; })),
+      },
       clearData: async (scope) => {
         await wipe('evaluations'); await wipe('votes');
         if (scope !== 'responses') { await wipe('teams'); await col('settings').doc('event').delete(); }
@@ -230,5 +243,5 @@
   window.DD = window.DD || {};
   const serverInfo = useFirebase ? null : probeServer();
   window.DD.store = useFirebase ? createFirebase() : serverInfo ? createServer(serverInfo) : createLocal();
-  window.DD.util = { judgeKeyOf, evalId, newId };
+  window.DD.util = { judgeKeyOf, evalId, newId, loadScript };
 })();

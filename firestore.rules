@@ -18,15 +18,59 @@ service cloud.firestore {
         || get(/databases/$(database)/documents/settings/event).data.get('votingOpen', true) == true;
     }
 
-    function validEvaluation(id) {
+    // Campos comunes a toda evaluación. El puntaje máximo depende de la rúbrica (hasta 1000).
+    function validEvaluationData(id) {
       let d = request.resource.data;
-      return eventOpen()
-        && d.total is number && d.total >= 0 && d.total <= 100
+      return d.total is number && d.total >= 0 && d.total <= 1000
         && d.teamId is string
         && id.matches(d.teamId + '__.*')
         && d.judgeName is string && d.judgeName.size() > 0 && d.judgeName.size() < 120
         && d.judgeEmail is string && d.judgeEmail.size() < 200
         && d.scores is map;
+    }
+
+    function validEvaluation(id) {
+      return eventOpen() && validEvaluationData(id);
+    }
+
+    // Evaluaciones adicionales: la apertura se guarda en su propio documento.
+    function extraFlag(eventId, flag) {
+      return exists(/databases/$(database)/documents/events/$(eventId))
+        && get(/databases/$(database)/documents/events/$(eventId)).data.get(flag, true) == true;
+    }
+
+    function extraTeamExists(eventId, teamId) {
+      return exists(/databases/$(database)/documents/events/$(eventId)/teams/$(teamId));
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow write: if isAdmin();
+
+      match /teams/{id} {
+        allow read: if true;
+        allow write: if isAdmin();
+      }
+
+      match /votes/{id} {
+        allow get: if true;
+        allow list, delete: if isAdmin();
+        allow create, update: if extraFlag(eventId, 'votingOpen')
+          && id.size() >= 8 && id.size() <= 64
+          && request.resource.data.voterId == id
+          && request.resource.data.eventId == eventId
+          && request.resource.data.teamId is string
+          && extraTeamExists(eventId, request.resource.data.teamId);
+      }
+
+      match /evaluations/{id} {
+        allow get: if true;
+        allow list, delete: if isAdmin();
+        allow create, update: if extraFlag(eventId, 'open')
+          && validEvaluationData(id)
+          && request.resource.data.eventId == eventId
+          && extraTeamExists(eventId, request.resource.data.teamId);
+      }
     }
 
     match /teams/{id} {

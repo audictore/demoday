@@ -115,6 +115,81 @@
     { id: 'publico', name: 'Premio del Público', basis: 'Mayor número de votos del público (QR general)', kind: 'votos' },
   ];
 
+  /* ---------- Evaluaciones configurables ----------
+     Cada evaluación guarda su propia configuración; sin ella se usa la del Demo Day definida arriba. */
+  const DEFAULT_EVENT = 'demoday';
+  const DEFAULT_CONFIG = { overallAward: AWARDS[0].name, rubric: RUBRIC, nominations: NOMINATIONS, feedback: FEEDBACK, categories: CATEGORIES };
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const randomId = (prefix) => prefix + Math.random().toString(36).slice(2, 8);
+
+  /** Completa los datos derivados: máximo por criterio, puntaje total y lista de premios. */
+  function normalizeConfig(raw) {
+    const c = raw && raw.rubric && raw.rubric.length ? raw : DEFAULT_CONFIG;
+    const rubric = c.rubric.map((r) => {
+      const levels = [...r.levels].map((l) => ({ ...l, pts: Number(l.pts) })).sort((a, b) => b.pts - a.pts);
+      return { ...r, desc: r.desc || '', levels, weight: levels[0].pts };
+    });
+    const ids = new Set(rubric.map((r) => r.id));
+    const nominations = (c.nominations || []).map((n) => ({ ...n, hint: n.hint || '', tieCriterion: ids.has(n.tieCriterion) ? n.tieCriterion : '' }));
+    const feedback = (c.feedback || []).map((f) => ({ ...f, help: f.help || '', required: !!f.required, area: f.area || f.label }));
+    const maxTotal = rubric.reduce((s, r) => s + r.weight, 0);
+    const overallAward = c.overallAward || AWARDS[0].name;
+    const awards = [
+      { id: 'negocio', name: overallAward, basis: `Mayor promedio total en la rúbrica de ${maxTotal} puntos`, kind: 'promedio' },
+      ...nominations.map((n) => ({ id: n.id, name: n.award, basis: 'Mayor acumulación de nominaciones "Sí"', kind: 'nominaciones', tieCriterion: n.tieCriterion })),
+      AWARDS[AWARDS.length - 1],
+    ];
+    return { overallAward, rubric, nominations, feedback, categories: c.categories || [], maxTotal, awards };
+  }
+
+  /** Punto de partida para una evaluación nueva sin copiar otra. */
+  function blankConfig() {
+    const levels = () => [
+      { key: 'excelente', label: 'Excelente', pts: 10, text: '' }, { key: 'bueno', label: 'Bueno', pts: 8, text: '' },
+      { key: 'suficiente', label: 'Suficiente', pts: 6, text: '' }, { key: 'insuficiente', label: 'Insuficiente', pts: 2, text: '' },
+    ];
+    return {
+      overallAward: 'Mejor proyecto', categories: [], nominations: [],
+      rubric: [1, 2, 3].map((n) => ({ id: randomId('c'), name: `Criterio ${n}`, desc: '', levels: levels() })),
+      feedback: [{ id: 'fortalezas', label: 'Fortalezas del proyecto', help: '', required: true, area: 'Fortalezas' }],
+    };
+  }
+
+  /** Revisa lo capturado en el editor. Devuelve los problemas y la configuración lista para guardar. */
+  function validateConfig(d) {
+    const errors = [];
+    const txt = (v) => String(v ?? '').trim();
+    if (d.rubric.length < 3 || d.rubric.length > 8) errors.push('La rúbrica debe tener entre 3 y 8 criterios.');
+    const rubric = d.rubric.map((r, i) => {
+      const name = txt(r.name) || `criterio ${i + 1}`;
+      if (!txt(r.name)) errors.push(`El criterio ${i + 1} no tiene nombre.`);
+      if (r.levels.length < 2 || r.levels.length > 6) errors.push(`«${name}» debe tener entre 2 y 6 niveles.`);
+      const levels = r.levels.map((l) => ({ key: l.key || randomId('l'), label: txt(l.label), pts: Number(l.pts), text: txt(l.text) }));
+      if (levels.some((l) => !l.label)) errors.push(`«${name}» tiene un nivel sin nombre.`);
+      if (levels.some((l) => !Number.isFinite(l.pts) || l.pts < 0)) errors.push(`«${name}» tiene puntos inválidos.`);
+      if (new Set(levels.map((l) => l.pts)).size !== levels.length) errors.push(`En «${name}» cada nivel debe tener puntos distintos.`);
+      return { id: r.id, name: txt(r.name), desc: txt(r.desc), levels: levels.sort((a, b) => b.pts - a.pts) };
+    });
+    const ids = new Set(rubric.map((r) => r.id));
+    const max = rubric.reduce((s, r) => s + Math.max(0, ...r.levels.map((l) => l.pts || 0)), 0);
+    if (max <= 0 || max > 1000) errors.push('El puntaje máximo de la rúbrica debe estar entre 1 y 1000.');
+    const nominations = d.nominations.map((n, i) => {
+      if (!txt(n.award) || !txt(n.question)) errors.push(`El premio ${i + 1} necesita nombre y pregunta.`);
+      return { id: n.id, award: txt(n.award), question: txt(n.question), hint: txt(n.hint), tieCriterion: ids.has(n.tieCriterion) ? n.tieCriterion : '' };
+    });
+    const feedback = d.feedback.map((f, i) => {
+      if (!txt(f.label)) errors.push(`La pregunta abierta ${i + 1} no tiene texto.`);
+      return { id: f.id, label: txt(f.label), help: txt(f.help), required: !!f.required, area: txt(f.area) || txt(f.label) };
+    });
+    if (!txt(d.overallAward)) errors.push('Escribe el nombre del premio al mejor promedio.');
+    const categories = (Array.isArray(d.categories) ? d.categories : String(d.categories || '').split(',')).map(txt).filter(Boolean);
+    return { errors, config: { overallAward: txt(d.overallAward), rubric, nominations, feedback, categories } };
+  }
+
   window.DD = window.DD || {};
-  Object.assign(window.DD, { RUBRIC, NOMINATIONS, FEEDBACK, CATEGORIES, AWARDS, MAX_TOTAL: 100 });
+  Object.assign(window.DD, {
+    RUBRIC, NOMINATIONS, FEEDBACK, CATEGORIES, AWARDS, MAX_TOTAL: 100,
+    DEFAULT_EVENT, normalizeConfig, blankConfig, validateConfig, cloneConfig: clone, randomId,
+    current: normalizeConfig(null),
+  });
 })();

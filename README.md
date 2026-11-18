@@ -1,4 +1,4 @@
-# Demo Day 2026 · Sistema de evaluación por QR
+# Sistema de evaluación de proyectos por QR
 
 Web estática (HTML + JS, sin compilar) que implementa la *Guía de evaluación* y la *Guía Operativa Demo Day Expo*:
 
@@ -68,6 +68,16 @@ Re-importar el mismo Excel actualiza los equipos existentes (mismo proyecto + gr
 - **Ganadores** se actualiza en tiempo real. Vigila **Jueces → Participación** para ver qué equipos no tienen evaluaciones.
 - Tras el recorrido: **Ajustes → desmarcar «Evaluaciones de jueces abiertas»**. Tras los 20 min de votación del público: desmarcar **«Votación del público abierta»**. **Jueces → Exportar CSV** descarga todo.
 - Si cambias `firestore.rules`, vuelve a **publicarlas** en Firebase (incluyen la colección `votes` del voto del público).
+
+## Varias evaluaciones
+
+Con Firebase, el panel maneja varias evaluaciones a la vez. Cada una tiene sus propios equipos, QR, respuestas, votos, resultados y ajustes de apertura.
+
+- **Crear:** en la barra **Evaluación**, pulsa **+ Nueva evaluación**. Puede copiar la evaluación abierta o empezar de una plantilla sencilla.
+- **Configurar:** en la pestaña **Rúbrica** se editan criterios, niveles, puntos, premios por nominación y preguntas abiertas. Se admiten de 3 a 8 criterios y hasta 1000 puntos.
+- **Proteger resultados:** la rúbrica se bloquea en cuanto hay respuestas. Para cambiarla, bórralas en **Ajustes** o crea otra evaluación copiándola.
+- **QR:** el Demo Day conserva sus enlaces (`#/e/EQUIPO`). Las demás usan `#/e/EVALUACION/EQUIPO` y `#/voto/EVALUACION`.
+- **Publicar:** esta función requiere las reglas actuales de `firestore.rules`. El servidor local (`serve.ps1`) sigue manejando una sola evaluación.
 
 ## Antes del evento: limpiar las pruebas
 

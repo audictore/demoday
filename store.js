@@ -10,13 +10,20 @@
   const evalId = (teamId, judgeKey) => `${teamId}__${judgeKey}`;
   const newId = () => Math.random().toString(36).slice(2, 8);
   const DEFAULT_SETTINGS = { open: true, votingOpen: true, baseUrl: '', eventName: 'Demo Day 2026' };
+  // El Demo Day original conserva sus colecciones y QR; cada evaluación nueva vive aparte (events/{id}/...).
+  const DEFAULT_EVENT = window.DD.DEFAULT_EVENT;
 
   /* ------------------------------ LOCAL ------------------------------ */
   function createLocal() {
     const K = { teams: 'dd_teams', evals: 'dd_evals', settings: 'dd_settings', votes: 'dd_votes' };
+    const EVENTS_KEY = 'dd_events';
     const listeners = { teams: new Set(), evals: new Set(), settings: new Set(), votes: new Set() };
-    const read = (k, d) => { try { return JSON.parse(localStorage.getItem(K[k])) ?? d; } catch (e) { return d; } };
-    const write = (k, v) => { localStorage.setItem(K[k], JSON.stringify(v)); emit(k); };
+    let scope = DEFAULT_EVENT;
+    const keyOf = (k, ev = scope) => (ev === DEFAULT_EVENT ? K[k] : `dd_ev_${ev}_${k}`);
+    const read = (k, d, ev = scope) => { try { return JSON.parse(localStorage.getItem(keyOf(k, ev))) ?? d; } catch (e) { return d; } };
+    const write = (k, v, ev = scope) => { localStorage.setItem(keyOf(k, ev), JSON.stringify(v)); if (ev === scope) emit(k); };
+    const readEvents = () => { try { return JSON.parse(localStorage.getItem(EVENTS_KEY)) || {}; } catch (e) { return {}; } };
+    const writeEvents = (v) => localStorage.setItem(EVENTS_KEY, JSON.stringify(v));
     const emit = (k) => listeners[k].forEach((cb) => cb(snapshot(k)));
     const snapshot = (k) => {
       if (k === 'settings') return { ...DEFAULT_SETTINGS, ...read('settings', {}) };
@@ -24,24 +31,47 @@
     };
     const sub = (k) => (cb) => { listeners[k].add(cb); cb(snapshot(k)); return () => listeners[k].delete(cb); };
     window.addEventListener('storage', (e) => {
-      const k = Object.keys(K).find((x) => K[x] === e.key);
+      const k = Object.keys(K).find((x) => keyOf(x) === e.key);
       if (k) emit(k);
     });
 
     return {
-      mode: 'local',
+      mode: 'local', supportsEvents: true,
       init: async () => {},
+      useEvent: (id) => { scope = id || DEFAULT_EVENT; },
+      eventField: () => (scope === DEFAULT_EVENT ? {} : { eventId: scope }),
+      getEventInfo: async () => {
+        const ev = readEvents()[scope];
+        if (scope === DEFAULT_EVENT) return { id: scope, config: ev ? ev.config : null };
+        return ev ? { id: scope, config: ev.config } : null;
+      },
+      listEvents: async () => {
+        const all = readEvents();
+        const others = Object.keys(all).filter((id) => id !== DEFAULT_EVENT).sort((a, b) => all[a].createdAt - all[b].createdAt);
+        return [DEFAULT_EVENT, ...others].map((id) => ({ id, eventName: { ...DEFAULT_SETTINGS, ...read('settings', {}, id) }.eventName }));
+      },
+      createEvent: async (eventName, config) => {
+        const id = window.DD.randomId('ev'); const all = readEvents();
+        all[id] = { config, createdAt: Date.now() }; writeEvents(all);
+        write('settings', { eventName }, id);
+        return id;
+      },
+      saveEventConfig: async (config) => { const all = readEvents(); all[scope] = { createdAt: Date.now(), ...all[scope], config }; writeEvents(all); },
+      deleteEvent: async (id) => {
+        Object.keys(K).forEach((k) => localStorage.removeItem(keyOf(k, id)));
+        const all = readEvents(); delete all[id]; writeEvents(all);
+      },
       onTeams: sub('teams'),
       onEvaluations: sub('evals'),
       onSettings: sub('settings'),
       onVotes: sub('votes'),
       getTeams: async () => Object.values(read('teams', {})),
       getVote: async (id) => read('votes', {})[id] || null,
-      saveVote: async (v) => { const all = read('votes', {}); all[v.id] = v; write('votes', all); },
+      saveVote: async (v) => { const ev = v.eventId || DEFAULT_EVENT; const all = read('votes', {}, ev); all[v.id] = v; write('votes', all, ev); },
       getTeam: async (id) => read('teams', {})[id] || null,
       getSettings: async () => snapshot('settings'),
       getEvaluation: async (teamId, jk) => read('evals', {})[evalId(teamId, jk)] || null,
-      saveEvaluation: async (ev) => { const all = read('evals', {}); all[ev.id] = ev; write('evals', all); },
+      saveEvaluation: async (e) => { const ev = e.eventId || DEFAULT_EVENT; const all = read('evals', {}, ev); all[e.id] = e; write('evals', all, ev); },
       deleteEvaluation: async (id) => { const all = read('evals', {}); delete all[id]; write('evals', all); },
       saveTeam: async (t) => { const all = read('teams', {}); all[t.id] = t; write('teams', all); },
       saveTeams: async (list) => { const all = read('teams', {}); list.forEach((t) => { all[t.id] = t; }); write('teams', all); },
@@ -51,12 +81,13 @@
         onChange: (cb) => { cb({ email: 'modo-demostracion' }); return () => {}; },
         signIn: async () => {}, signOut: async () => {},
       },
-      // scope 'responses': solo evaluaciones y votos (conserva equipos y ajustes). 'all': todo.
-      clearData: async (scope) => {
-        const keys = scope === 'responses' ? ['evals', 'votes'] : Object.keys(K);
-        keys.forEach((k) => localStorage.removeItem(K[k])); keys.forEach(emit);
+      // what 'responses': solo evaluaciones y votos (conserva equipos y ajustes). 'all': todo.
+      clearData: async (what) => {
+        // En una evaluación adicional, "todo" conserva su nombre y su rúbrica.
+        const keys = what === 'responses' ? ['evals', 'votes'] : scope === DEFAULT_EVENT ? Object.keys(K) : ['teams', 'evals', 'votes'];
+        keys.forEach((k) => localStorage.removeItem(keyOf(k))); keys.forEach(emit);
       },
-      resetLocal: async () => { Object.values(K).forEach((k) => localStorage.removeItem(k)); Object.keys(K).forEach(emit); },
+      resetLocal: async () => { Object.keys(K).forEach((k) => localStorage.removeItem(keyOf(k))); Object.keys(K).forEach(emit); },
     };
   }
 
@@ -76,12 +107,14 @@
   }
 
   function createFirebase() {
-    let db, auth, ready = null;
+    let db, auth, ready = null, scope = DEFAULT_EVENT;
     const sdk = (file) => loadScript(`https://www.gstatic.com/firebasejs/${FB_VERSION}/${file}`);
-    const col = (n) => db.collection(n);
+    const eventRef = (id = scope) => db.collection('events').doc(id);
+    const col = (n, ev = scope) => (ev === DEFAULT_EVENT ? db : eventRef(ev)).collection(n);
+    const settingsRef = () => (scope === DEFAULT_EVENT ? db.collection('settings').doc('event') : eventRef());
     const docs = (snap) => snap.docs.map((d) => ({ ...d.data(), id: d.id }));
-    const wipe = async (name) => {
-      const snap = await col(name).get();
+    const wipe = async (name, ev = scope) => {
+      const snap = await col(name, ev).get();
       for (let i = 0; i < snap.docs.length; i += 400) {
         const b = db.batch();
         snap.docs.slice(i, i + 400).forEach((d) => b.delete(d.ref));
@@ -97,7 +130,7 @@
       db = firebase.firestore();
     })().catch((e) => { ready = null; throw e; }));
     return {
-      mode: 'firebase',
+      mode: 'firebase', supportsEvents: true,
       init,
       initAdmin: async () => {
         await sdk('firebase-app-compat.js');
@@ -105,24 +138,51 @@
         await init();
         auth = firebase.auth();
       },
-      clearData: async (scope) => {
+      useEvent: (id) => { scope = id || DEFAULT_EVENT; },
+      eventField: () => (scope === DEFAULT_EVENT ? {} : { eventId: scope }),
+      getEventInfo: async () => {
+        try {
+          const s = await eventRef().get();
+          if (s.exists) return { id: scope, config: s.data().config || null };
+        } catch (e) { if (scope !== DEFAULT_EVENT) throw e; }
+        return scope === DEFAULT_EVENT ? { id: scope, config: null } : null;
+      },
+      listEvents: async () => {
+        const [main, snap] = await Promise.all([db.collection('settings').doc('event').get(), db.collection('events').get()]);
+        const others = docs(snap).filter((e) => e.id !== DEFAULT_EVENT).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+        return [{ id: DEFAULT_EVENT, eventName: { ...DEFAULT_SETTINGS, ...(main.exists ? main.data() : {}) }.eventName }, ...others.map((e) => ({ id: e.id, eventName: e.eventName }))];
+      },
+      createEvent: async (eventName, config) => {
+        const id = window.DD.randomId('ev');
+        await eventRef(id).set({ eventName, open: true, votingOpen: true, baseUrl: '', config, createdAt: Date.now() });
+        return id;
+      },
+      saveEventConfig: (config) => eventRef().set({ config }, { merge: true }),
+      deleteEvent: async (id) => {
+        await wipe('evaluations', id); await wipe('votes', id); await wipe('teams', id);
+        await eventRef(id).delete();
+      },
+      clearData: async (what) => {
         await wipe('evaluations'); await wipe('votes');
-        if (scope !== 'responses') { await wipe('teams'); await col('settings').doc('event').delete(); }
+        if (what !== 'responses') {
+          await wipe('teams');
+          if (scope === DEFAULT_EVENT) await settingsRef().delete(); // una evaluación adicional conserva nombre y rúbrica
+        }
       },
       onTeams: (cb) => col('teams').onSnapshot((s) => cb(docs(s)), (e) => console.error('teams', e)),
       onEvaluations: (cb, onErr) => col('evaluations').onSnapshot((s) => cb(docs(s)), onErr || ((e) => console.error('evaluations', e))),
-      onSettings: (cb) => col('settings').doc('event').onSnapshot((s) => cb({ ...DEFAULT_SETTINGS, ...(s.exists ? s.data() : {}) })),
+      onSettings: (cb) => settingsRef().onSnapshot((s) => cb({ ...DEFAULT_SETTINGS, ...(s.exists ? s.data() : {}) })),
       onVotes: (cb, onErr) => col('votes').onSnapshot((s) => cb(docs(s)), onErr || ((e) => console.error('votes', e))),
       getTeams: async () => docs(await col('teams').get()),
       getVote: async (id) => { const s = await col('votes').doc(id).get(); return s.exists ? { ...s.data(), id: s.id } : null; },
-      saveVote: (v) => col('votes').doc(v.id).set(v),
+      saveVote: (v) => col('votes', v.eventId || DEFAULT_EVENT).doc(v.id).set(v),
       getTeam: async (id) => { const s = await col('teams').doc(id).get(); return s.exists ? { ...s.data(), id: s.id } : null; },
-      getSettings: async () => { const s = await col('settings').doc('event').get(); return { ...DEFAULT_SETTINGS, ...(s.exists ? s.data() : {}) }; },
+      getSettings: async () => { const s = await settingsRef().get(); return { ...DEFAULT_SETTINGS, ...(s.exists ? s.data() : {}) }; },
       getEvaluation: async (teamId, jk) => {
         const s = await col('evaluations').doc(evalId(teamId, jk)).get();
         return s.exists ? { ...s.data(), id: s.id } : null;
       },
-      saveEvaluation: (ev) => col('evaluations').doc(ev.id).set(ev),
+      saveEvaluation: (ev) => col('evaluations', ev.eventId || DEFAULT_EVENT).doc(ev.id).set(ev),
       deleteEvaluation: (id) => col('evaluations').doc(id).delete(),
       saveTeam: (t) => col('teams').doc(t.id).set(t),
       saveTeams: async (list) => {
@@ -133,7 +193,7 @@
         }
       },
       deleteTeam: (id) => col('teams').doc(id).delete(),
-      saveSettings: (p) => col('settings').doc('event').set(p, { merge: true }),
+      saveSettings: (p) => settingsRef().set(p, { merge: true }),
       auth: {
         onChange: (cb) => auth.onAuthStateChanged((u) => cb(u ? { email: u.email } : null)),
         signIn: (email, pass) => auth.signInWithEmailAndPassword(email, pass),
@@ -206,8 +266,12 @@
     const withKick = (p) => p.then((r) => { kick(); return r; });
 
     return {
-      mode: 'server', serverInfo: info,
+      mode: 'server', serverInfo: info, supportsEvents: false, // el servidor local maneja una sola evaluación
       init: async () => {},
+      useEvent: () => {},
+      eventField: () => ({}),
+      getEventInfo: async () => ({ id: DEFAULT_EVENT, config: null }),
+      listEvents: async () => [],
       onTeams: sub('teams'), onEvaluations: sub('evals'), onVotes: sub('votes'), onSettings: sub('settings'),
       getTeam: (id) => api('GET', 'teams/' + id),
       getTeams: async () => (await api('GET', 'teams')) || [],

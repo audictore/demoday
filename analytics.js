@@ -1,6 +1,9 @@
 /* Cálculos puros: promedios, puntos de mejora, rankings y ganadores. */
 (function () {
-  const { RUBRIC, NOMINATIONS, AWARDS, FEEDBACK } = window.DD;
+  // Configuración de la evaluación abierta (la cambia useConfig).
+  let RUBRIC, NOMINATIONS, AWARDS, FEEDBACK;
+  function useConfig(c) { ({ rubric: RUBRIC, nominations: NOMINATIONS, awards: AWARDS, feedback: FEEDBACK } = c); }
+  useConfig(window.DD.current);
 
   const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
   const r1 = (x) => Math.round(x * 10) / 10;
@@ -124,5 +127,5 @@
     return out.sort((a, b) => b.at - a.at);
   }
 
-  window.DD.analytics = { mean, r1, teamStats, improvements, allStats, globalStats, rankAward, winners, observations, GOOD, CRITICAL };
+  window.DD.analytics = { useConfig, mean, r1, teamStats, improvements, allStats, globalStats, rankAward, winners, observations, GOOD, CRITICAL };
 })();

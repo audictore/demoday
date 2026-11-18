@@ -1,9 +1,20 @@
 /* Demo Day 2026 · interfaz: página de evaluación (QR) y panel de administración. */
 (function () {
-  const { RUBRIC, NOMINATIONS, FEEDBACK, CATEGORIES, AWARDS } = window.DD;
+  const { DEFAULT_EVENT } = window.DD;
   const A = window.DD.analytics;
   const store = window.DD.store;
   const { judgeKeyOf, evalId, newId, loadScript } = window.DD.util;
+
+  // Configuración de la evaluación abierta: cada una tiene su rúbrica, premios y preguntas.
+  let RUBRIC, NOMINATIONS, FEEDBACK, CATEGORIES, AWARDS, MAX_TOTAL;
+  function useConfig(raw) {
+    const c = window.DD.normalizeConfig(raw);
+    window.DD.current = c;
+    ({ rubric: RUBRIC, nominations: NOMINATIONS, feedback: FEEDBACK, categories: CATEGORIES, awards: AWARDS, maxTotal: MAX_TOTAL } = c);
+    A.useConfig(c);
+    return c;
+  }
+  useConfig(null);
 
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -22,10 +33,10 @@
   /** Aviso de envío pendiente (sin señal). Pasa a «Enviada» solo cuando la cola de reintentos lo entrega. */
   const queuedNoteHtml = (res, noun) => (res.status === 'queued'
     ? `<div class="banner" id="queuedNote">${statusPill('warn', 'Pendiente de enviar')} Sin señal: tu ${noun} quedó guardad${noun === 'evaluación' ? 'a' : 'o'} en este teléfono y se enviará solo en cuanto vuelva la conexión. Puedes dejar esta página abierta o volver a abrir el sitio más tarde.</div>` : '');
-  function watchQueued(res, kind, id, noun) {
+  function watchQueued(res, kind, doc, noun) {
     if (res.status !== 'queued') return;
     const off = window.DD.outbox.onChange(() => {
-      if (window.DD.outbox.has(kind, id)) return;
+      if (window.DD.outbox.has(kind, doc)) return;
       const el = $('#queuedNote');
       if (el) { el.className = 'banner info'; el.innerHTML = `${statusPill('on', 'Enviado')} Tu ${esc(noun)} ya llegó. ¡Gracias!`; }
       off();
@@ -41,6 +52,7 @@
     </div></div>`;
   const norm = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
   const SHORT = { viabilidad: 'Viabilidad', problema: 'Problema', innovacion: 'Innovación', prototipo: 'Prototipo', defensa: 'Defensa' };
+  const shortName = (c) => SHORT[c.id] || c.name.split(/\s+/)[0].slice(0, 14);
   const app = $('#app');
   const safeLS = {
     get: (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } },
@@ -120,8 +132,10 @@
     }
     return cfg.replace(/#.*$/, '');
   };
-  const teamUrl = (settings, team) => `${baseUrl(settings)}#/e/${team.id}`;
-  const voteUrl = (settings) => `${baseUrl(settings)}#/voto`;
+  // Los QR del Demo Day conservan su formato original; las demás evaluaciones llevan su identificador.
+  const eventPath = () => (state.eventId === DEFAULT_EVENT ? '' : `/${state.eventId}`);
+  const teamUrl = (settings, team) => `${baseUrl(settings)}#/e${eventPath()}/${team.id}`;
+  const voteUrl = (settings) => `${baseUrl(settings)}#/voto${eventPath()}`;
   const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'equipo';
   const fmtDate = (ms) => (ms ? new Date(ms).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '');
 
@@ -131,10 +145,11 @@
     cleanups = [];
     document.body.classList.remove('is-admin');
     const h = location.hash.replace(/^#\/?/, '');
-    const [a, b] = h.split('/');
+    const [a, b, c] = h.split('/');
     window.scrollTo(0, 0);
-    if (a === 'e' && b) return viewEval(b);
-    if (a === 'voto') return viewVoto();
+    if (a === 'e' && c) return viewEval(c, b);
+    if (a === 'e' && b) return viewEval(b, DEFAULT_EVENT);
+    if (a === 'voto') return viewVoto(b || DEFAULT_EVENT);
     if (a === 'admin') return viewAdmin();
     return viewHome();
   }
@@ -146,7 +161,7 @@
       <div class="wrap narrow">
         <div class="card hero">
           ${logoImg('lg')}
-          <h1>Demo Day 2026</h1>
+          <h1>Evaluación de proyectos</h1>
           <p class="muted">Sistema de evaluación por código QR</p>
           <p><b>Jueces:</b> escaneen el código QR del stand del equipo que van a evaluar.</p>
           <p><b>Público:</b> escanea el QR general para votar por tu proyecto favorito.</p>
@@ -157,11 +172,23 @@
   }
 
   /* ============================ EVALUACIÓN (QR) ============================ */
-  async function viewEval(teamId) {
+  const eventMissingScreen = () => stateScreen('bad', '?', 'Evaluación no encontrada', 'Este código QR no corresponde a ninguna evaluación activa. Avisa a los organizadores.');
+
+  /** Prepara la evaluación indicada para jueces y público. Devuelve false si ya no existe. */
+  async function loadEvent(eventId) {
+    await store.init();
+    store.useEvent(eventId);
+    const info = await store.getEventInfo();
+    if (!info) return false;
+    useConfig(info.config);
+    return true;
+  }
+
+  async function viewEval(teamId, eventId = DEFAULT_EVENT) {
     app.innerHTML = '<div class="wrap narrow"><div class="card center">Cargando…</div></div>';
     let team, settings;
     try {
-      await store.init();
+      if (!await loadEvent(eventId)) { app.innerHTML = eventMissingScreen(); return; }
       [team, settings] = await Promise.all([store.getTeam(teamId), store.getSettings()]);
     } catch (e) {
       app.innerHTML = `<div class="wrap narrow"><div class="card"><h2>No se pudo cargar</h2><p>${esc(e.message)}</p></div></div>`;
@@ -182,7 +209,7 @@
     const members = (team.members || []).map((m) => `<li>${esc(m)}</li>`).join('');
     const criteriaHtml = RUBRIC.map((c) => `
       <fieldset class="crit" data-crit="${c.id}">
-        <legend>${esc(c.name)} <span class="weight">${c.weight}% · máx. ${c.weight} pts</span></legend>
+        <legend>${esc(c.name)} <span class="weight">${Math.round((c.weight / MAX_TOTAL) * 100)}% · máx. ${c.weight} pts</span></legend>
         <p class="muted">${esc(c.desc)}</p>
         ${c.levels.map((l) => `
           <label class="opt">
@@ -205,6 +232,7 @@
         <textarea name="f_${f.id}" rows="3" maxlength="1500"></textarea>
       </label>`).join('');
 
+    let section = 2;
     app.innerHTML = `
       <div class="wrap narrow">
         ${brandbar(settings.eventName + ' · Evaluación')}
@@ -229,22 +257,22 @@
           </section>
 
           <section class="card">
-            <h2>2. Rúbrica (100 puntos)</h2>
+            <h2>2. Rúbrica (${MAX_TOTAL} puntos)</h2>
             ${criteriaHtml}
           </section>
 
-          <section class="card">
-            <h2>3. Nominaciones a premios especiales</h2>
+          ${NOMINATIONS.length ? `<section class="card">
+            <h2>${++section}. Nominaciones a premios especiales</h2>
             ${nomHtml}
-          </section>
+          </section>` : ''}
 
-          <section class="card">
-            <h2>4. Retroalimentación</h2>
+          ${FEEDBACK.length ? `<section class="card">
+            <h2>${++section}. Retroalimentación</h2>
             ${fbHtml}
-          </section>
+          </section>` : ''}
 
           <div class="submitbar">
-            <div class="total">Total <b id="liveTotal">0</b>/100<span class="progress" id="progress">0/5 criterios</span></div>
+            <div class="total">Total <b id="liveTotal">0</b>/${MAX_TOTAL}<span class="progress" id="progress">0/${RUBRIC.length} criterios</span></div>
             <button class="btn primary" type="submit" id="sendBtn">Enviar evaluación</button>
           </div>
           <p class="error" id="formError" hidden></p>
@@ -252,6 +280,7 @@
       </div>`;
 
     const form = $('#evalForm');
+    const missingFeedback = () => FEEDBACK.filter((f) => f.required && !form.elements['f_' + f.id].value.trim());
     const recalc = () => {
       let t = 0, answered = 0;
       RUBRIC.forEach((c) => {
@@ -260,7 +289,7 @@
         form.querySelector(`[data-crit="${c.id}"]`).classList.toggle('done', !!r);
       });
       $('#liveTotal').textContent = t;
-      const ready = answered === RUBRIC.length && form.elements.f_fortalezas.value.trim()
+      const ready = answered === RUBRIC.length && !missingFeedback().length
         && form.elements.judgeName.value.trim() && /^\S+@\S+\.\S+$/.test(form.elements.judgeEmail.value.trim());
       const pr = $('#progress');
       pr.className = 'progress' + (ready ? ' ready' : '');
@@ -307,12 +336,11 @@
         const r = form.querySelector(`input[name="c_${c.id}"]:checked`);
         if (r) scores[c.id] = Number(r.value); else missing.push(c.id);
       });
-      const fortalezas = form.elements.f_fortalezas.value.trim();
       const problems = [];
       if (!name) problems.push('escribe tu nombre');
       if (!/^\S+@\S+\.\S+$/.test(email)) problems.push('escribe un correo válido');
       if (missing.length) problems.push('selecciona un nivel en cada criterio de la rúbrica');
-      if (!fortalezas) problems.push('describe las fortalezas del proyecto');
+      missingFeedback().forEach((f) => problems.push(`responde «${f.label}»`));
       if (problems.length) {
         missing.forEach((id) => form.querySelector(`[data-crit="${id}"]`).classList.add('invalid'));
         err.textContent = 'Falta: ' + problems.join('; ') + '.'; err.hidden = false;
@@ -323,6 +351,7 @@
       const jk = judgeKeyOf(email);
       const now = Date.now();
       const ev = {
+        ...store.eventField(),
         id: evalId(teamId, jk), teamId, judgeKey: jk, judgeName: name, judgeEmail: email,
         scores, total: RUBRIC.reduce((s, c) => s + scores[c.id], 0),
         nominations: Object.fromEntries(NOMINATIONS.map((n) => [n.id, form.querySelector(`input[name="n_${n.id}"]:checked`).value === '1'])),
@@ -339,12 +368,12 @@
             <div class="check">✓</div>
             <h2>${res.status === 'queued' ? 'Evaluación guardada' : '¡Evaluación registrada!'}</h2>
             ${queuedNoteHtml(res, 'evaluación')}
-            <p><b>${esc(team.name)}</b><br>Tu puntaje: <b>${saved2.total}/100</b></p>
+            <p><b>${esc(team.name)}</b><br>Tu puntaje: <b>${saved2.total}/${MAX_TOTAL}</b></p>
             <p class="muted">Gracias, ${esc(name)}. Puedes pasar al siguiente stand y escanear su código QR.</p>
             <button class="btn ghost" id="editAgain">Editar mi evaluación</button>
           </div></div>`;
-        $('#editAgain').onclick = () => viewEval(teamId);
-        watchQueued(res, 'eval', ev.id, 'evaluación');
+        $('#editAgain').onclick = () => viewEval(teamId, eventId);
+        watchQueued(res, 'eval', ev, 'evaluación');
         window.scrollTo(0, 0);
       } catch (ex) {
         btn.disabled = false; btn.textContent = 'Enviar evaluación';
@@ -354,11 +383,11 @@
   }
 
   /* ======================== VOTO DEL PÚBLICO (QR general) ======================== */
-  async function viewVoto() {
+  async function viewVoto(eventId = DEFAULT_EVENT) {
     app.innerHTML = '<div class="wrap narrow"><div class="card center">Cargando…</div></div>';
     let teams, settings;
     try {
-      await store.init();
+      if (!await loadEvent(eventId)) { app.innerHTML = eventMissingScreen(); return; }
       [teams, settings] = await Promise.all([store.getTeams(), store.getSettings()]);
     } catch (e) {
       app.innerHTML = `<div class="wrap narrow"><div class="card"><h2>No se pudo cargar</h2><p>${esc(e.message)}</p></div></div>`;
@@ -419,7 +448,7 @@
       const btn = $('#voteBtn'); btn.disabled = true; btn.textContent = 'Enviando…';
       const now = Date.now();
       try {
-        const vote = { id: voterId, voterId, teamId: r.value, createdAt: (current && current.createdAt) || now, updatedAt: now };
+        const vote = { ...store.eventField(), id: voterId, voterId, teamId: r.value, createdAt: (current && current.createdAt) || now, updatedAt: now };
         const res = await window.DD.outbox.submit('vote', vote);
         const t = teams.find((x) => x.id === r.value);
         app.innerHTML = `
@@ -430,8 +459,8 @@
             <p class="muted">Gracias por participar en el Premio del Público.</p>
             <button class="btn ghost" id="changeVote">Cambiar mi voto</button>
           </div></div>`;
-        $('#changeVote').onclick = () => viewVoto();
-        watchQueued(res, 'vote', vote.id, 'voto');
+        $('#changeVote').onclick = () => viewVoto(eventId);
+        watchQueued(res, 'vote', vote, 'voto');
         window.scrollTo(0, 0);
       } catch (ex) {
         btn.disabled = false; btn.textContent = 'Enviar voto';
@@ -443,10 +472,11 @@
   /* =============================== ADMIN =============================== */
   const TABS = [
     ['ganadores', 'Ganadores'], ['estadisticas', 'Estadísticas'], ['equipos', 'Equipos y QR'],
-    ['observaciones', 'Observaciones'], ['evaluaciones', 'Jueces'], ['ajustes', 'Ajustes'],
-  ];
-  const state = { teams: [], evals: [], votes: [], settings: { open: true, votingOpen: true, baseUrl: '', eventName: 'Demo Day 2026' }, tab: safeLS.get('dd_tab') || 'ganadores', evalError: null };
+    ['observaciones', 'Observaciones'], ['evaluaciones', 'Jueces'], ['rubrica', 'Rúbrica'], ['ajustes', 'Ajustes'],
+  ].filter(([id]) => id !== 'rubrica' || store.supportsEvents);
+  const state = { eventId: DEFAULT_EVENT, events: [], teams: [], evals: [], votes: [], settings: { open: true, votingOpen: true, baseUrl: '', eventName: 'Demo Day 2026' }, tab: safeLS.get('dd_tab') || 'ganadores', evalError: null };
   let currentTab = null; // { update() }
+  let stopData = null, openToken = 0;
 
   async function viewAdmin() {
     document.body.classList.add('is-admin');
@@ -487,24 +517,91 @@
         <div class="who"><span id="livePill"></span>
           ${store.mode !== 'local' ? `<span class="who-mail">${esc(user.email)}</span><button class="btn ghost sm" id="logoutBtn">Salir</button>` : ''}</div>
       </header>
-      <main class="admin-main"><div id="tab-content"></div></main>`;
+      <main class="admin-main"><div class="ev-bar" id="evBar" hidden></div><div id="tab-content"></div></main>`;
     const lo = $('#logoutBtn'); if (lo) lo.onclick = () => store.auth.signOut();
     $('#tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); });
 
-    const unsubs = [
-      store.onTeams((t) => { state.teams = t; refresh(); }),
-      store.onEvaluations((ev) => { state.evals = ev; state.evalError = null; refresh(); }, (err) => { state.evalError = err.message; refresh(); }),
-      store.onVotes((v) => { state.votes = v; refresh(); }, () => { state.votes = []; }),
-      store.onSettings((s) => { state.settings = s; const n = $('#evName'); if (n) n.textContent = s.eventName; refresh(); }),
-    ];
-    const stop = () => unsubs.forEach((u) => u && u());
+    const stop = () => { openToken++; if (stopData) { stopData(); stopData = null; } };
     stop.__data = true;
     onLeave(stop);
     window.addEventListener('online', updateLive);
     window.addEventListener('offline', updateLive);
     onLeave(() => { window.removeEventListener('online', updateLive); window.removeEventListener('offline', updateLive); });
     updateLive();
+    const saved = safeLS.get('dd_event') || DEFAULT_EVENT;
+    reloadEvents().then(() => openEvent(state.events.some((e) => e.id === saved) ? saved : DEFAULT_EVENT));
+  }
+
+  async function reloadEvents() {
+    try { state.events = await store.listEvents(); } catch (e) { state.events = []; }
+    if (!state.events.some((e) => e.id === DEFAULT_EVENT)) state.events.unshift({ id: DEFAULT_EVENT, eventName: state.settings.eventName });
+  }
+
+  /** Abre una evaluación en el panel: carga su configuración y se suscribe solo a sus datos. */
+  async function openEvent(id) {
+    const token = ++openToken;
+    if (stopData) { stopData(); stopData = null; }
+    store.useEvent(id);
+    state.eventId = id; safeLS.set('dd_event', id);
+    Object.assign(state, { teams: [], evals: [], votes: [], evalError: null, statTeam: null });
+    let info = null;
+    try { info = await store.getEventInfo(); } catch (e) { /* se resuelve abajo */ }
+    if (token !== openToken) return;
+    if (!info && id !== DEFAULT_EVENT) { openEvent(DEFAULT_EVENT); return; }
+    useConfig(info && info.config);
+    const unsubs = [
+      store.onTeams((t) => { state.teams = t; refresh(); }),
+      store.onEvaluations((ev) => { state.evals = ev; state.evalError = null; refresh(); }, (err) => { state.evalError = err.message; refresh(); }),
+      store.onVotes((v) => { state.votes = v; refresh(); }, () => { state.votes = []; }),
+      store.onSettings((s) => {
+        state.settings = s;
+        const n = $('#evName'); if (n) n.textContent = s.eventName;
+        const opt = $(`#evSel option[value="${state.eventId}"]`); if (opt) opt.textContent = s.eventName;
+        refresh();
+      }),
+    ];
+    stopData = () => unsubs.forEach((u) => u && u());
+    renderEventBar();
     switchTab(state.tab);
+  }
+
+  function renderEventBar() {
+    const bar = $('#evBar'); if (!bar || !store.supportsEvents) return;
+    bar.hidden = false;
+    bar.innerHTML = `
+      <label class="inline">Evaluación: <select id="evSel">${state.events.map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? 'selected' : ''}>${esc(e.eventName)}</option>`).join('')}</select></label>
+      <button class="btn sm" id="evNew">+ Nueva evaluación</button>`;
+    $('#evSel').onchange = (e) => openEvent(e.target.value);
+    $('#evNew').onclick = newEventDialog;
+  }
+
+  const editableConfig = () => {
+    const c = window.DD.current;
+    return window.DD.cloneConfig({
+      overallAward: c.overallAward, categories: c.categories.join(', '),
+      rubric: c.rubric.map(({ id, name, desc, levels }) => ({ id, name, desc, levels })),
+      nominations: c.nominations, feedback: c.feedback,
+    });
+  };
+
+  function newEventDialog() {
+    const d = openDialog(`
+      <h3>Nueva evaluación</h3>
+      <form id="evForm" class="stack-form">
+        <label class="field"><span>Nombre</span><input name="name" required maxlength="80" placeholder="Ej. Proyecto integrador 7.º cuatrimestre"></label>
+        <label class="check"><input type="radio" name="base" value="copy" checked> Copiar rúbrica, premios y preguntas de «${esc(state.settings.eventName)}»</label>
+        <label class="check"><input type="radio" name="base" value="blank"> Empezar con una plantilla sencilla</label>
+        <p class="muted">Tendrá sus propios equipos, QR, evaluaciones y resultados.</p>
+        <div class="row end"><button type="button" class="btn ghost" data-close>Cancelar</button><button class="btn primary">Crear</button></div>
+      </form>`);
+    $('#evForm', d).onsubmit = async (e) => {
+      e.preventDefault(); const f = e.target; const name = f.name.value.trim(); if (!name) return;
+      const config = f.base.value === 'copy' ? window.DD.validateConfig(editableConfig()).config : window.DD.blankConfig();
+      try {
+        const id = await store.createEvent(name, config);
+        await reloadEvents(); d.close(); state.tab = 'rubrica'; openEvent(id); toast('Evaluación creada');
+      } catch (ex) { toast('No se pudo crear: ' + ex.message, 'bad'); }
+    };
   }
 
   /** Indicador de conexión: demostración (naranja), en vivo (verde), sin conexión / sin acceso (rojo). */
@@ -542,7 +639,7 @@
     const act = $('#tabs button.active'), strip = $('#tabs');
     if (act && strip) strip.scrollLeft = act.offsetLeft - (strip.clientWidth - act.offsetWidth) / 2;
     const el = $('#tab-content'); if (!el) return;
-    const views = { ganadores: tabGanadores, estadisticas: tabEstadisticas, equipos: tabEquipos, observaciones: tabObservaciones, evaluaciones: tabEvaluaciones, ajustes: tabAjustes };
+    const views = { ganadores: tabGanadores, estadisticas: tabEstadisticas, equipos: tabEquipos, observaciones: tabObservaciones, evaluaciones: tabEvaluaciones, rubrica: tabRubrica, ajustes: tabAjustes };
     el.innerHTML = '';
     currentTab = (views[id] || tabGanadores)(el);
     currentTab.update();
@@ -596,7 +693,7 @@
             <div class="kpi"><b>${g.teams}</b><span>Equipos</span></div>
             <div class="kpi"><b>${g.evaluations}</b><span>Evaluaciones</span></div>
             <div class="kpi"><b>${g.judges}</b><span>Jueces</span></div>
-            <div class="kpi"><b>${g.evaluations ? fmt(g.avgTotal) : '–'}</b><span>Promedio global /100</span></div>
+            <div class="kpi"><b>${g.evaluations ? fmt(g.avgTotal) : '–'}</b><span>Promedio global /${MAX_TOTAL}</span></div>
             <div class="kpi"><b>${g.votes}</b><span>Votos del público</span></div>
           </div>
           ${missing > 0 ? `<div class="banner">${missing} equipo${missing === 1 ? '' : 's'} aún sin evaluaciones: ${esc(d.stats.filter((s) => !s.n).map((s) => s.team.name).slice(0, 6).join(', '))}${missing > 6 ? '…' : ''}.</div>` : ''}
@@ -631,7 +728,7 @@
           ${tieNote(award, overall)}
           <ol class="toplist">${top.map((r) => `
             <li><span class="nm">${esc(r.s.team.name)}</span>
-              <div class="bar"><i style="width:${Math.round((r.primary / (award.kind === 'promedio' ? 100 : maxP)) * 100)}%"></i></div>
+              <div class="bar"><i style="width:${Math.round((r.primary / (award.kind === 'promedio' ? MAX_TOTAL : maxP)) * 100)}%"></i></div>
               <span class="val">${awardVal(award, r.primary)}</span></li>`).join('')}</ol>
           <details><summary>Ganador por categoría</summary>
             <div class="cat-grid">${byCategory.map(({ category, result }) => `
@@ -649,7 +746,7 @@
     const ring = (v) => RUBRIC.map((_, i) => pt(i, v).join(',')).join(' ');
     const labels = RUBRIC.map((cr, i) => {
       const [x, y] = pt(i, 1.28); const a = Math.abs(x - c) < 8 ? 'middle' : x > c ? 'start' : 'end';
-      return `<text x="${x}" y="${y}" text-anchor="${a}" dominant-baseline="middle">${SHORT[cr.id]}</text>`;
+      return `<text x="${x}" y="${y}" text-anchor="${a}" dominant-baseline="middle">${esc(shortName(cr))}</text>`;
     }).join('');
     const team = series.find((s) => s.cls === 'ser-t');
     return `<svg viewBox="-50 0 440 340" class="radar" role="img" aria-label="Gráfica de radar por criterio"
@@ -669,7 +766,7 @@
     const poly = (v) => RUBRIC.map((_, i) => str(pt(i, v))).join(' ');
     const short = o.short ? RUBRIC.map((c, i) => {
       const [x, y] = pt(i, 1.2); const a = Math.abs(x - o.cx) < 8 ? 'middle' : x > o.cx ? 'start' : 'end';
-      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${a}" dominant-baseline="middle">${SHORT[c.id]}</text>`;
+      return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${a}" dominant-baseline="middle">${esc(shortName(c))}</text>`;
     }).join('') : '';
     return `<svg viewBox="0 0 ${o.w} ${o.h}" class="pent-svg" role="img" aria-label="Gráfico de pentágono con el promedio por criterio"
         data-cx="${o.cx}" data-cy="${o.cy}" data-r="${o.R}" data-pcts="${pcts.join(',')}" style="--cx:${o.cx}px;--cy:${o.cy}px">
@@ -683,24 +780,27 @@
   function pentagonHtml(crit) {
     const pcts = crit.map((c) => c.pct);
     // Escritorio: etiquetas HTML alrededor de cada vértice (posiciones en % del contenedor 820×520).
-    const W = 820, H = 520;
-    const pos = [
-      { l: 260, w: 300, y: 98, cls: 'c', up: true },
-      { l: 595, w: 225, y: 224, cls: 'l', mid: true },
-      { l: 531, w: 289, y: 418, cls: 'l' },
-      { l: 9, w: 280, y: 418, cls: 'r' },
-      { l: 0, w: 225, y: 224, cls: 'r', mid: true },
-    ];
+    const W = 820, H = 520, CX = 410, CY = 275, R = 165, n = RUBRIC.length;
+    // La posición de cada etiqueta sale del ángulo de su vértice, así sirve para cualquier número de criterios.
+    const pos = RUBRIC.map((_, i) => {
+      const a = (2 * Math.PI * i) / n, sx = Math.sin(a), cy = Math.cos(a);
+      const x = CX + R * sx, y = CY - R * cy;
+      if (Math.abs(sx) < 0.2) return cy > 0 ? { l: x - 150, w: 300, y: y - 12, cls: 'c', up: true } : { l: x - 150, w: 300, y: y + 12, cls: 'c' };
+      const low = cy < -0.5, gap = low ? 24 : 28;
+      if (sx > 0) { const l = x + gap; return { l, w: Math.min(W - l, 289), y: low ? y + 10 : y, cls: 'l', mid: !low }; }
+      const w = Math.min(x - gap, 289);
+      return { l: x - gap - w, w, y: low ? y + 10 : y, cls: 'r', mid: !low };
+    });
     const labels = RUBRIC.map((c, i) => {
       const p = pos[i]; const k = crit[i]; const warn = k.pct < A.GOOD;
-      return `<div class="pent-label ${p.cls}" data-i="${i}" style="--i:${i};left:${(p.l / W) * 100}%;width:${(p.w / W) * 100}%;top:${(p.y / H) * 100}%;--ty:${p.up ? '-100%' : p.mid ? '-50%' : '0%'}">
-        <b>${esc(c.name)} (${c.weight}%)</b><span>${esc(c.desc)}</span>
+      return `<div class="pent-label ${p.cls}${n > 6 ? ' compact' : ''}" data-i="${i}" style="--i:${i};left:${(p.l / W) * 100}%;width:${(p.w / W) * 100}%;top:${(p.y / H) * 100}%;--ty:${p.up ? '-100%' : p.mid ? '-50%' : '0%'}">
+        <b>${esc(c.name)} (${Math.round((c.weight / MAX_TOTAL) * 100)}%)</b><span>${esc(c.desc)}</span>
         <strong class="${warn ? 'warn' : ''}" data-pi="${i}" data-w="${c.weight}" data-full="1">${fmt(k.avg)}/${c.weight} · ${pct(k.pct)}</strong></div>`;
     }).join('');
     // Móvil: pentágono compacto + lista.
-    const list = RUBRIC.map((c, i) => `<li style="--i:${i}"><span>${esc(c.name)} <small>(${c.weight}%)</small></span><strong class="${crit[i].pct < A.GOOD ? 'warn' : ''}" data-pi="${i}" data-w="${c.weight}">${fmt(crit[i].avg)}/${c.weight}</strong></li>`).join('');
+    const list = RUBRIC.map((c, i) => `<li style="--i:${i}"><span>${esc(c.name)} <small>(${Math.round((c.weight / MAX_TOTAL) * 100)}%)</small></span><strong class="${crit[i].pct < A.GOOD ? 'warn' : ''}" data-pi="${i}" data-w="${c.weight}">${fmt(crit[i].avg)}/${c.weight}</strong></li>`).join('');
     return `
-      <div class="pent-desktop"><div class="pent-wrap">${pentagonSvg(pcts, { w: W, h: H, cx: 410, cy: 275, R: 165 })}${labels}</div></div>
+      <div class="pent-desktop"><div class="pent-wrap">${pentagonSvg(pcts, { w: W, h: H, cx: CX, cy: CY, R })}${labels}</div></div>
       <div class="pent-mobile">${pentagonSvg(pcts, { w: 340, h: 300, cx: 170, cy: 150, R: 92, short: true })}<ul class="pent-list">${list}</ul></div>`;
   }
 
@@ -814,7 +914,7 @@
         <div class="kpi"><b>${g.teamsEvaluated}/${g.teams}</b><span>Equipos evaluados</span></div>
         <div class="kpi"><b>${g.evaluations}</b><span>Evaluaciones</span></div>
         <div class="kpi"><b>${g.judges}</b><span>Jueces participantes</span></div>
-        <div class="kpi"><b>${fmt(g.avgTotal)}</b><span>Promedio global /100</span></div>
+        <div class="kpi"><b>${fmt(g.avgTotal)}</b><span>Promedio global /${MAX_TOTAL}</span></div>
       </div>
       <section class="card pent-card"><h3>Promedio por criterio (todo el evento)</h3>
         ${pentagonHtml(g.crit)}
@@ -829,7 +929,7 @@
       <section class="card"><h3>Ranking general por puntaje promedio</h3>
         <ol class="toplist wide">${ranked.map((s, i) => `
           <li><span class="rk">${i + 1}</span><span class="nm">${esc(s.team.name)}<small>${esc(s.team.category || '')}</small></span>
-            <div class="bar"><i style="width:${fmt(s.avgTotal, 0)}%"></i></div>
+            <div class="bar"><i style="width:${Math.round((s.avgTotal / MAX_TOTAL) * 100)}%"></i></div>
             <span class="val">${fmt(s.avgTotal)}</span><span class="ev">${s.n} ev.</span></li>`).join('')}</ol>
       </section>
       ${g.votes ? `
@@ -868,14 +968,14 @@
     // Para cada nivel de la rúbrica, qué jueces lo otorgaron (de mejor a peor nivel).
     const judgeLevels = (rc) => rc.levels.map((l, i) => {
       const js = teamEvals.filter((e) => e.scores[rc.id] === l.pts).sort((a, b) => a.judgeName.localeCompare(b.judgeName));
-      return js.length ? `<div class="jl"><span class="jl-lv lv${i}"><i></i>${esc(l.label)} · ${l.pts} pts</span>
+      return js.length ? `<div class="jl"><span class="jl-lv lv${Math.min(i, 3)}"><i></i>${esc(l.label)} · ${l.pts} pts</span>
         <span class="jl-names">${js.map((e) => `<span class="jchip" title="${esc(e.judgeEmail)}">${esc(e.judgeName)}</span>`).join('')}</span></div>` : '';
     }).join('');
     const obsByArea = FEEDBACK.map((f) => ({ f, items: teamEvals.filter((e) => (e[f.id] || '').trim()) }));
 
     return head + `
       <div class="kpis">
-        <div class="kpi"><b>${fmt(s.avgTotal)}</b><span>Promedio /100</span></div>
+        <div class="kpi"><b>${fmt(s.avgTotal)}</b><span>Promedio /${MAX_TOTAL}</span></div>
         <div class="kpi"><b>${s.n}</b><span>Evaluaciones</span></div>
         <div class="kpi"><b>${posAll}º/${rankAll.length}</b><span>Lugar general</span></div>
         <div class="kpi"><b>${posCat}º/${sameCat.length}</b><span>En su categoría</span></div>
@@ -1135,7 +1235,7 @@
       <div id="ev-body"></div>`;
     $('#ev-csv').onclick = () => {
       const d = derived(); const tById = Object.fromEntries(state.teams.map((t) => [t.id, t]));
-      downloadCSV('evaluaciones_demoday.csv', [
+      downloadCSV(`evaluaciones_${slug(state.settings.eventName)}.csv`, [
         ['Proyecto', 'Grupo', 'Categoría', 'Juez', 'Correo', ...RUBRIC.map((c) => c.name), 'Total', ...NOMINATIONS.map((n) => n.award), ...FEEDBACK.map((f) => f.label), 'Fecha'],
         ...d.evals.map((e) => { const t = tById[e.teamId]; return [t.name, t.group, t.category, e.judgeName, e.judgeEmail, ...RUBRIC.map((c) => e.scores[c.id]), e.total,
           ...NOMINATIONS.map((n) => (e.nominations && e.nominations[n.id] ? 'Sí' : 'No')), ...FEEDBACK.map((f) => e[f.id] || ''), fmtDate(e.updatedAt)]; }),
@@ -1173,6 +1273,109 @@
     };
   }
 
+  /* ======================== TAB: RÚBRICA (editor) ======================== */
+  function tabRubrica(host) {
+    host.innerHTML = '<div id="rb-root"></div>';
+    const el = $('#rb-root', host);
+    let draft = editableConfig(), lastLocked = null;
+    const LV = () => [['Excelente', 10], ['Bueno', 8], ['Suficiente', 6], ['Insuficiente', 2]].map(([label, pts]) => ({ key: window.DD.randomId('l'), label, pts, text: '' }));
+    const at = (path) => path.split('.').reduce((o, k) => o[k], draft);
+    const put = (path, v) => { const ks = path.split('.'), last = ks.pop(); ks.reduce((o, k) => o[k], draft)[last] = v; };
+    const inp = (path, val, ph = '', attrs = '') => `<input data-k="${path}" value="${esc(val)}" placeholder="${esc(ph)}" ${attrs}>`;
+    const del = (path, label) => `<button type="button" class="btn sm ghost danger-t" data-del="${path}">${label}</button>`;
+    const draftMax = () => draft.rubric.reduce((s, r) => s + Math.max(0, ...r.levels.map((l) => Number(l.pts) || 0)), 0);
+
+    function render() {
+      const locked = state.evals.length > 0; lastLocked = locked;
+      el.innerHTML = `
+        ${locked ? `<div class="banner">${statusPill('warn', 'Bloqueada')} Esta evaluación ya tiene ${state.evals.length} respuesta${state.evals.length === 1 ? '' : 's'}. Para no alterar sus resultados no se puede editar: bórralas en <b>Ajustes</b> o crea una evaluación nueva copiando esta.</div>` : ''}
+        <form id="rbForm"><fieldset class="ed-root" ${locked ? 'disabled' : ''}>
+          <section class="card"><h3>General</h3>
+            <label class="field"><span>Premio al mejor promedio</span>${inp('overallAward', draft.overallAward, 'Ej. Mejor proyecto')}</label>
+            <label class="field"><span>Categorías sugeridas</span><small>Separadas por comas. Son opcionales.</small>${inp('categories', draft.categories, 'Ej. Tecnología, Servicios')}</label>
+          </section>
+          <section class="card"><h3>Criterios de la rúbrica <span class="weight" id="rbMax"></span></h3>
+            ${draft.rubric.map((c, i) => `
+              <div class="ed-item">
+                <div class="ed-head"><b>Criterio ${i + 1}</b>${del(`rubric.${i}`, 'Quitar criterio')}</div>
+                <label class="field"><span>Nombre</span>${inp(`rubric.${i}.name`, c.name)}</label>
+                <label class="field"><span>Descripción</span>${inp(`rubric.${i}.desc`, c.desc)}</label>
+                <div class="ed-levels">${c.levels.map((l, j) => `
+                  <div class="ed-level">
+                    ${inp(`rubric.${i}.levels.${j}.label`, l.label, 'Nivel', 'aria-label="Nombre del nivel"')}
+                    ${inp(`rubric.${i}.levels.${j}.pts`, l.pts, 'Pts', 'type="number" min="0" step="any" aria-label="Puntos"')}
+                    ${inp(`rubric.${i}.levels.${j}.text`, l.text, 'Qué significa este nivel', 'aria-label="Descripción del nivel"')}
+                    ${del(`rubric.${i}.levels.${j}`, 'Quitar')}
+                  </div>`).join('')}</div>
+                <button type="button" class="btn sm" data-add="level:${i}">+ Nivel</button>
+              </div>`).join('')}
+            <button type="button" class="btn" data-add="crit">+ Agregar criterio</button>
+          </section>
+          <section class="card"><h3>Premios por nominación</h3>
+            <p class="muted">Cada juez responde Sí o No; gana quien acumule más «Sí». El premio al mejor promedio y el del público siempre existen.</p>
+            ${draft.nominations.map((n, i) => `
+              <div class="ed-item">
+                <div class="ed-head"><b>Premio ${i + 1}</b>${del(`nominations.${i}`, 'Quitar premio')}</div>
+                <label class="field"><span>Nombre del premio</span>${inp(`nominations.${i}.award`, n.award)}</label>
+                <label class="field"><span>Pregunta para el juez</span>${inp(`nominations.${i}.question`, n.question)}</label>
+                <label class="field"><span>Aclaración</span>${inp(`nominations.${i}.hint`, n.hint)}</label>
+                <label class="field"><span>Criterio para desempatar</span><select data-k="nominations.${i}.tieCriterion">
+                  <option value="">Promedio total</option>${draft.rubric.map((c) => `<option value="${esc(c.id)}" ${c.id === n.tieCriterion ? 'selected' : ''}>${esc(c.name || 'Sin nombre')}</option>`).join('')}</select></label>
+              </div>`).join('')}
+            <button type="button" class="btn" data-add="nom">+ Agregar premio</button>
+          </section>
+          <section class="card"><h3>Preguntas abiertas</h3>
+            ${draft.feedback.map((f, i) => `
+              <div class="ed-item">
+                <div class="ed-head"><b>Pregunta ${i + 1}</b>${del(`feedback.${i}`, 'Quitar pregunta')}</div>
+                <label class="field"><span>Pregunta</span>${inp(`feedback.${i}.label`, f.label)}</label>
+                <label class="field"><span>Ayuda para el juez</span>${inp(`feedback.${i}.help`, f.help)}</label>
+                <label class="check"><input type="checkbox" data-k="feedback.${i}.required" ${f.required ? 'checked' : ''}> Obligatoria</label>
+              </div>`).join('')}
+            <button type="button" class="btn" data-add="fb">+ Agregar pregunta</button>
+          </section>
+          <div class="banner bad" id="rbErr" hidden></div>
+          <div class="ed-save"><button class="btn primary">Guardar rúbrica</button></div>
+        </fieldset></form>`;
+      paintMax();
+      $('#rbForm', el).onsubmit = save;
+    }
+    const paintMax = () => { const m = $('#rbMax', el); if (m) m.textContent = `Puntaje máximo: ${draftMax()}`; };
+
+    async function save(e) {
+      e.preventDefault();
+      const { errors, config } = window.DD.validateConfig(draft);
+      const box = $('#rbErr', el);
+      if (errors.length) { box.innerHTML = errors.map(esc).join('<br>'); box.hidden = false; box.scrollIntoView({ block: 'center' }); return; }
+      try {
+        await store.saveEventConfig(config);
+        useConfig(config); draft = editableConfig(); render(); toast('Rúbrica guardada');
+      } catch (ex) { toast('No se pudo guardar: ' + ex.message, 'bad'); }
+    }
+
+    el.addEventListener('input', (e) => {
+      const k = e.target.dataset.k; if (!k) return;
+      put(k, e.target.type === 'checkbox' ? e.target.checked : e.target.value);
+      paintMax();
+    });
+    el.addEventListener('click', (e) => {
+      const add = e.target.closest('[data-add]'), rm = e.target.closest('[data-del]');
+      if (add) {
+        const [what, i] = add.dataset.add.split(':');
+        if (what === 'crit') draft.rubric.push({ id: window.DD.randomId('c'), name: '', desc: '', levels: LV() });
+        if (what === 'level') draft.rubric[i].levels.push({ key: window.DD.randomId('l'), label: '', pts: '', text: '' });
+        if (what === 'nom') draft.nominations.push({ id: window.DD.randomId('n'), award: '', question: '', hint: '', tieCriterion: '' });
+        if (what === 'fb') draft.feedback.push({ id: window.DD.randomId('q'), label: '', help: '', required: false, area: '' });
+        render();
+      } else if (rm) {
+        const ks = rm.dataset.del.split('.'), idx = Number(ks.pop());
+        at(ks.join('.')).splice(idx, 1);
+        render();
+      }
+    });
+    return { update() { if (lastLocked !== (state.evals.length > 0)) render(); } };
+  }
+
   /* =========================== TAB: AJUSTES =========================== */
   function tabAjustes(el) {
     el.innerHTML = '<div id="aj-body"></div>';
@@ -1183,9 +1386,9 @@
         built = true;
         const s = state.settings;
         $('#aj-body').innerHTML = `
-          <section class="card"><h3>Evento</h3>
+          <section class="card"><h3>Evaluación</h3>
             <form id="ajForm" class="stack-form">
-              <label class="field"><span>Nombre del evento</span><input name="eventName" value="${esc(s.eventName)}"></label>
+              <label class="field"><span>Nombre de la evaluación</span><input name="eventName" value="${esc(s.eventName)}"></label>
               <label class="field"><span>URL pública de esta página</span>
                 <small>Dirección donde publicaste el sistema (termina en <code>index.html</code> o en el dominio). Los QR se generan con ella. Déjala vacía para usar la dirección actual.</small>
                 <input name="baseUrl" placeholder="https://mi-demoday.web.app/" value="${esc(s.baseUrl)}"></label>
@@ -1203,12 +1406,24 @@
               <button class="btn danger" id="clearRespBtn">Borrar evaluaciones y votos</button>
               <button class="btn danger" id="resetBtn">Borrar todo</button>
             </div>
-            <p class="muted">«Borrar evaluaciones y votos» conserva los equipos y sus QR: úsalo después de las pruebas, antes del evento. «Borrar todo» también elimina los equipos y los ajustes.</p>
+            <p class="muted">Solo afectan a esta evaluación. «Borrar evaluaciones y votos» conserva los equipos y sus QR: úsalo después de las pruebas. «Borrar todo» también elimina los equipos${state.eventId === DEFAULT_EVENT ? ' y los ajustes' : ''}.</p>
+            ${state.eventId !== DEFAULT_EVENT ? '<div class="row"><button class="btn danger" id="delEventBtn">Eliminar esta evaluación</button></div>' : ''}
           </section>`;
         $('#ajForm').onsubmit = async (e) => {
           e.preventDefault(); const f = e.target;
-          try { await store.saveSettings({ eventName: f.eventName.value.trim() || 'Demo Day 2026', baseUrl: f.baseUrl.value.trim(), open: f.open.checked, votingOpen: f.votingOpen.checked }); toast('Ajustes guardados'); }
-          catch (ex) { toast(ex.message, 'bad'); }
+          try {
+            await store.saveSettings({ eventName: f.eventName.value.trim() || s.eventName, baseUrl: f.baseUrl.value.trim(), open: f.open.checked, votingOpen: f.votingOpen.checked });
+            await reloadEvents(); renderEventBar(); toast('Ajustes guardados');
+          } catch (ex) { toast(ex.message, 'bad'); }
+        };
+        const delBtn = $('#delEventBtn');
+        if (delBtn) delBtn.onclick = async () => {
+          if (!await confirmDialog(`¿Eliminar «${state.settings.eventName}» con sus equipos, evaluaciones y votos? Sus QR dejarán de funcionar. No se puede deshacer.`, 'Eliminar evaluación')) return;
+          try {
+            const id = state.eventId;
+            if (stopData) { stopData(); stopData = null; }
+            await store.deleteEvent(id); await reloadEvents(); openEvent(DEFAULT_EVENT); toast('Evaluación eliminada');
+          } catch (ex) { toast('No se pudo eliminar: ' + ex.message, 'bad'); }
         };
         if (store.mode !== 'firebase') $('#seedBtn').onclick = async () => { await loadScript('demo.js'); await window.DD.seedDemo(); toast('Datos de demostración cargados'); };
         const where = store.mode === 'firebase' ? 'de Firebase' : store.mode === 'server' ? 'del servidor' : 'de este navegador';

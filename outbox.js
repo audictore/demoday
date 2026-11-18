@@ -13,7 +13,8 @@
     listeners.forEach((f) => f(list.length));
     schedule(list.length);
   };
-  const same = (x, kind, id) => x.kind === kind && x.doc.id === id;
+  // Un mismo teléfono puede votar en varias evaluaciones: el envío se identifica también por su evaluación.
+  const same = (x, kind, doc) => x.kind === kind && x.doc.id === doc.id && (x.doc.eventId || '') === (doc.eventId || '');
 
   // Errores de red/tiempo se reintentan; los demás (evaluaciones cerradas, datos inválidos) no.
   const isNetwork = (e) => !!e && (e instanceof TypeError || e.name === 'TimeoutError'
@@ -30,8 +31,8 @@
     return item.kind === 'eval' ? store.saveEvaluation(item.doc) : store.saveVote(item.doc);
   }
 
-  function remove(kind, id) {
-    const list = read(), rest = list.filter((x) => !same(x, kind, id));
+  function remove(kind, doc) {
+    const list = read(), rest = list.filter((x) => !same(x, kind, doc));
     if (rest.length !== list.length) write(rest);
   }
 
@@ -39,11 +40,11 @@
   async function submit(kind, doc) {
     try {
       await withTimeout(send({ kind, doc }), TIMEOUT_MS);
-      remove(kind, doc.id);
+      remove(kind, doc);
       return { status: 'sent' };
     } catch (e) {
       if (!isNetwork(e)) throw e;
-      write(read().filter((x) => !same(x, kind, doc.id)).concat({ kind, doc, at: Date.now() }));
+      write(read().filter((x) => !same(x, kind, doc)).concat({ kind, doc, at: Date.now() }));
       return { status: 'queued' };
     }
   }
@@ -53,10 +54,10 @@
     flushing = true;
     try {
       for (const item of read()) {
-        try { await withTimeout(send(item), TIMEOUT_MS); remove(item.kind, item.doc.id); }
+        try { await withTimeout(send(item), TIMEOUT_MS); remove(item.kind, item.doc); }
         catch (e) {
           if (isNetwork(e)) break;            // sigue sin señal: se vuelve a intentar luego
-          remove(item.kind, item.doc.id);     // rechazado de forma definitiva (p. ej. evaluaciones cerradas)
+          remove(item.kind, item.doc);        // rechazado de forma definitiva (p. ej. evaluaciones cerradas)
         }
       }
     } finally { flushing = false; }
@@ -72,7 +73,7 @@
   window.DD.outbox = {
     submit, flush,
     pending: () => read().length,
-    has: (kind, id) => read().some((x) => same(x, kind, id)),
+    has: (kind, doc) => read().some((x) => same(x, kind, doc)),
     onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
   };
   schedule(read().length);

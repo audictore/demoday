@@ -1,6 +1,5 @@
 /* Datos de demostración (solo modo local): equipos, jueces y evaluaciones inventadas. */
 (function () {
-  const { RUBRIC, NOMINATIONS } = window.DD;
   const { judgeKeyOf, evalId } = window.DD.util;
 
   const TEAMS = [
@@ -28,6 +27,8 @@
 
   window.DD.seedDemo = async function () {
     const store = window.DD.store;
+    const { rubric: RUBRIC, nominations: NOMINATIONS, feedback: FEEDBACK } = window.DD.current;
+    const evField = store.eventField ? store.eventField() : {};
     const now = Date.now();
     const teams = TEAMS.map(([name, group, category, members], i) => ({ id: 'demo' + (i + 1), name, group, category, members, stand: String(i + 1), description: '' }));
     await store.saveTeams(teams);
@@ -39,18 +40,17 @@
         RUBRIC.forEach((c) => {
           const r = q + (Math.random() - 0.5) * 0.45;
           const idx = r > 0.8 ? 0 : r > 0.6 ? 1 : r > 0.4 ? 2 : 3;
-          scores[c.id] = c.levels[idx].pts;
+          scores[c.id] = c.levels[Math.min(idx, c.levels.length - 1)].pts;
         });
         const jk = judgeKeyOf(JUDGES[ji][1]);
         const ev = {
+          ...evField,
           id: evalId(teams[ti].id, jk), teamId: teams[ti].id, judgeKey: jk, judgeName: JUDGES[ji][0], judgeEmail: JUDGES[ji][1],
-          scores, total: Object.values(scores).reduce((a, b) => a + b, 0),          nominations: Object.fromEntries(NOMINATIONS.map((n) => [n.id, Math.random() < q * q * 0.7])),
-          fortalezas: pick(POOL.fortalezas),
-          mejoraPrototipo: Math.random() < 0.7 ? pick(POOL.mejoraPrototipo) : '',
-          mejoraNegocio: Math.random() < 0.6 ? pick(POOL.mejoraNegocio) : '',
-          mejoraEscala: Math.random() < 0.5 ? pick(POOL.mejoraEscala) : '',
+          scores, total: Object.values(scores).reduce((a, b) => a + b, 0),
+          nominations: Object.fromEntries(NOMINATIONS.map((n) => [n.id, Math.random() < q * q * 0.7])),
           createdAt: now - Math.floor(Math.random() * 3600e3), updatedAt: now - Math.floor(Math.random() * 3600e3),
         };
+        FEEDBACK.forEach((f) => { ev[f.id] = f.required || Math.random() < 0.6 ? pick(POOL[f.id] || POOL.fortalezas) : ''; });
         await store.saveEvaluation(ev);
       }
     }
@@ -60,7 +60,7 @@
     for (let i = 0; i < 60; i++) {
       let r = Math.random() * sum; let ti = 0;
       while (ti < weights.length - 1 && r > weights[ti]) { r -= weights[ti]; ti++; }
-      await store.saveVote({ id: 'demovoter' + i, voterId: 'demovoter' + i, teamId: teams[ti].id, createdAt: now, updatedAt: now });
+      await store.saveVote({ ...evField, id: 'demovoter' + i, voterId: 'demovoter' + i, teamId: teams[ti].id, createdAt: now, updatedAt: now });
     }
   };
 })();

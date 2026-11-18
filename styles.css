@@ -435,7 +435,6 @@ body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100
 .ev-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 24px; }
 .ev-bar label.inline select { min-width: 260px; max-width: 100%; }
 .ed-root { border: 0; padding: 0; margin: 0; min-width: 0; }
-.ed-root:disabled { opacity: .62; }
 .ed-item { background: var(--fill); border-radius: var(--r-md); padding: 18px; margin: 14px 0; }
 .ed-item input, .ed-item select { background: var(--card); }
 .ed-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }

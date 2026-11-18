@@ -1277,8 +1277,8 @@
   function tabRubrica(host) {
     host.innerHTML = '<div id="rb-root"></div>';
     const el = $('#rb-root', host);
-    let draft = editableConfig(), lastLocked = null;
-    const LV = () => [['Excelente', 10], ['Bueno', 8], ['Suficiente', 6], ['Insuficiente', 2]].map(([label, pts]) => ({ key: window.DD.randomId('l'), label, pts, text: '' }));
+    let draft = editableConfig();
+    const LV =() => [['Excelente', 10], ['Bueno', 8], ['Suficiente', 6], ['Insuficiente', 2]].map(([label, pts]) => ({ key: window.DD.randomId('l'), label, pts, text: '' }));
     const at = (path) => path.split('.').reduce((o, k) => o[k], draft);
     const put = (path, v) => { const ks = path.split('.'), last = ks.pop(); ks.reduce((o, k) => o[k], draft)[last] = v; };
     const inp = (path, val, ph = '', attrs = '') => `<input data-k="${path}" value="${esc(val)}" placeholder="${esc(ph)}" ${attrs}>`;
@@ -1286,10 +1286,9 @@
     const draftMax = () => draft.rubric.reduce((s, r) => s + Math.max(0, ...r.levels.map((l) => Number(l.pts) || 0)), 0);
 
     function render() {
-      const locked = state.evals.length > 0; lastLocked = locked;
       el.innerHTML = `
-        ${locked ? `<div class="banner">${statusPill('warn', 'Bloqueada')} Esta evaluación ya tiene ${state.evals.length} respuesta${state.evals.length === 1 ? '' : 's'}. Para no alterar sus resultados no se puede editar: bórralas en <b>Ajustes</b> o crea una evaluación nueva copiando esta.</div>` : ''}
-        <form id="rbForm"><fieldset class="ed-root" ${locked ? 'disabled' : ''}>
+        <div id="rbNote"></div>
+        <form id="rbForm"><div class="ed-root">
           <section class="card"><h3>General</h3>
             <label class="field"><span>Premio al mejor promedio</span>${inp('overallAward', draft.overallAward, 'Ej. Mejor proyecto')}</label>
             <label class="field"><span>Categorías sugeridas</span><small>Separadas por comas. Son opcionales.</small>${inp('categories', draft.categories, 'Ej. Tecnología, Servicios')}</label>
@@ -1336,21 +1335,36 @@
           </section>
           <div class="banner bad" id="rbErr" hidden></div>
           <div class="ed-save"><button class="btn primary">Guardar rúbrica</button></div>
-        </fieldset></form>`;
-      paintMax();
+        </div></form>`;
+      paintMax(); paintNote();
       $('#rbForm', el).onsubmit = save;
     }
     const paintMax = () => { const m = $('#rbMax', el); if (m) m.textContent = `Puntaje máximo: ${draftMax()}`; };
+    const answers = (n) => `${n} respuesta${n === 1 ? '' : 's'}`;
+    const paintNote = () => {
+      const n = state.evals.length, box = $('#rbNote', el); if (!box) return;
+      box.innerHTML = n ? `<div class="banner info">Esta evaluación ya tiene ${answers(n)}. Los textos, premios y preguntas se pueden cambiar sin afectarlas. Si cambias puntos, niveles o criterios, al guardar se pedirá confirmar porque habrá que borrarlas.</div>` : '';
+    };
+    // Las respuestas guardan los puntos elegidos: solo siguen siendo válidas si criterios y puntos no cambian.
+    const scoring = (c) => JSON.stringify(c.rubric.map((r) => [r.id, r.levels.map((l) => Number(l.pts)).sort((a, b) => b - a)]));
 
     async function save(e) {
       e.preventDefault();
       const { errors, config } = window.DD.validateConfig(draft);
       const box = $('#rbErr', el);
-      if (errors.length) { box.innerHTML = errors.map(esc).join('<br>'); box.hidden = false; box.scrollIntoView({ block: 'center' }); return; }
+      box.hidden = !errors.length;
+      if (errors.length) { box.innerHTML = errors.map(esc).join('<br>'); box.scrollIntoView({ block: 'center' }); return; }
+      const n = state.evals.length;
+      const clearAnswers = n > 0 && scoring(config) !== scoring(window.DD.current);
+      if (clearAnswers && !await confirmDialog(`Cambiaste puntos, niveles o criterios y hay ${answers(n)} calificada${n === 1 ? '' : 's'} con la rúbrica anterior. Para que los resultados sean correctos se ${n === 1 ? 'borrará' : 'borrarán'}. Los equipos, sus QR y los votos se conservan. No se puede deshacer.`, 'Borrar respuestas y guardar')) return;
       try {
         await store.saveEventConfig(config);
-        useConfig(config); draft = editableConfig(); render(); toast('Rúbrica guardada');
-      } catch (ex) { toast('No se pudo guardar: ' + ex.message, 'bad'); }
+      } catch (ex) { toast('No se pudo guardar: ' + ex.message, 'bad'); return; }
+      useConfig(config); draft = editableConfig(); render();
+      if (!clearAnswers) { toast('Rúbrica guardada'); return; }
+      try {
+        await store.clearData('evaluations'); toast('Rúbrica guardada y respuestas borradas');
+      } catch (ex) { toast('La rúbrica se guardó, pero faltó borrar las respuestas. Bórralas en Ajustes.', 'bad'); }
     }
 
     el.addEventListener('input', (e) => {
@@ -1373,7 +1387,8 @@
         render();
       }
     });
-    return { update() { if (lastLocked !== (state.evals.length > 0)) render(); } };
+    render();
+    return { update: paintNote };
   }
 
   /* =========================== TAB: AJUSTES =========================== */

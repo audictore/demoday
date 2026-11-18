@@ -75,7 +75,7 @@ Con Firebase, el panel maneja varias evaluaciones a la vez. Cada una tiene sus p
 
 - **Crear:** en la barra **Evaluación**, pulsa **+ Nueva evaluación**. Puede copiar la evaluación abierta o empezar de una plantilla sencilla.
 - **Configurar:** en la pestaña **Rúbrica** se editan criterios, niveles, puntos, premios por nominación y preguntas abiertas. Se admiten de 3 a 8 criterios y hasta 1000 puntos.
-- **Proteger resultados:** la rúbrica se bloquea en cuanto hay respuestas. Para cambiarla, bórralas en **Ajustes** o crea otra evaluación copiándola.
+- **Proteger resultados:** con respuestas registradas se pueden cambiar textos, premios y preguntas sin afectarlas. Si cambias puntos, niveles o criterios, al guardar se pide confirmar y se borran las evaluaciones de esa rúbrica; equipos, QR y votos se conservan.
 - **QR:** el Demo Day conserva sus enlaces (`#/e/EQUIPO`). Las demás usan `#/e/EVALUACION/EQUIPO` y `#/voto/EVALUACION`.
 - **Publicar:** esta función requiere las reglas actuales de `firestore.rules`. El servidor local (`serve.ps1`) sigue manejando una sola evaluación.
 

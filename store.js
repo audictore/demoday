@@ -81,10 +81,10 @@
         onChange: (cb) => { cb({ email: 'modo-demostracion' }); return () => {}; },
         signIn: async () => {}, signOut: async () => {},
       },
-      // what 'responses': solo evaluaciones y votos (conserva equipos y ajustes). 'all': todo.
+      // what 'evaluations': solo evaluaciones. 'responses': evaluaciones y votos (conserva equipos y ajustes). 'all': todo.
       clearData: async (what) => {
         // En una evaluación adicional, "todo" conserva su nombre y su rúbrica.
-        const keys = what === 'responses' ? ['evals', 'votes'] : scope === DEFAULT_EVENT ? Object.keys(K) : ['teams', 'evals', 'votes'];
+        const keys = what === 'evaluations' ? ['evals'] : what === 'responses' ? ['evals', 'votes'] : scope === DEFAULT_EVENT ? Object.keys(K) : ['teams', 'evals', 'votes'];
         keys.forEach((k) => localStorage.removeItem(keyOf(k))); keys.forEach(emit);
       },
       resetLocal: async () => { Object.keys(K).forEach((k) => localStorage.removeItem(keyOf(k))); Object.keys(K).forEach(emit); },
@@ -163,7 +163,9 @@
         await eventRef(id).delete();
       },
       clearData: async (what) => {
-        await wipe('evaluations'); await wipe('votes');
+        await wipe('evaluations');
+        if (what === 'evaluations') return;
+        await wipe('votes');
         if (what !== 'responses') {
           await wipe('teams');
           if (scope === DEFAULT_EVENT) await settingsRef().delete(); // una evaluación adicional conserva nombre y rúbrica

@@ -12,7 +12,7 @@
   const GOOD = 0.8;
   const CRITICAL = 0.6;
 
-  function teamStats(team, evals, votes = 0) {
+  function teamStats(team, evals) {
     const n = evals.length;
     const crit = {};
     RUBRIC.forEach((c) => {
@@ -27,7 +27,7 @@
     const noms = {};
     NOMINATIONS.forEach((nm) => { noms[nm.id] = evals.filter((e) => e.nominations && e.nominations[nm.id]).length; });
     return {
-      team, n, crit, noms, votes,
+      team, n, crit, noms,
       avgTotal: mean(evals.map((e) => e.total)),
       judges: new Set(evals.map((e) => e.judgeKey)).size,
     };
@@ -44,12 +44,10 @@
       }));
   }
 
-  function allStats(teams, evals, votes = []) {
+  function allStats(teams, evals) {
     const byTeam = {};
     evals.forEach((e) => { (byTeam[e.teamId] = byTeam[e.teamId] || []).push(e); });
-    const votesBy = {};
-    votes.forEach((v) => { votesBy[v.teamId] = (votesBy[v.teamId] || 0) + 1; });
-    return teams.map((t) => teamStats(t, byTeam[t.id] || [], votesBy[t.id] || 0));
+    return teams.map((t) => teamStats(t, byTeam[t.id] || []));
   }
 
   function globalStats(statsList, evals) {
@@ -65,7 +63,6 @@
       evaluations: evals.length,
       judges: new Set(evals.map((e) => e.judgeKey)).size,
       avgTotal: mean(evals.map((e) => e.total)),
-      votes: statsList.reduce((a, s) => a + s.votes, 0),
       crit,
       weakTeamsByCrit: RUBRIC.map((c) => ({
         id: c.id, name: c.name,
@@ -77,8 +74,8 @@
   /** Ranking de un premio dentro de un conjunto de equipos. Devuelve filas ordenadas + metadatos de empate. */
   function rankAward(award, statsList) {
     const kind = award.kind;
-    const pool = statsList.filter((s) => (kind === 'votos' ? s.votes > 0 : s.n > 0));
-    const primary = (s) => (kind === 'promedio' ? s.avgTotal : kind === 'votos' ? s.votes : s.noms[award.id]);
+    const pool = statsList.filter((s) => s.n > 0);
+    const primary = (s) => (kind === 'promedio' ? s.avgTotal : s.noms[award.id]);
     const tie1 = (s) => (award.tieCriterion ? s.crit[award.tieCriterion].avg : s.avgTotal);
     const rows = pool
       .map((s) => ({ s, primary: primary(s), tie1: tie1(s), tie2: s.avgTotal }))
@@ -89,7 +86,7 @@
     const top = rows[0];
     const tied = rows.filter((r) => eq(r.primary, top.primary));
     const stillTied = tied.filter((r) => eq(r.tie1, top.tie1) && eq(r.tie2, top.tie2));
-    // Un premio por conteo/votos sin ningún punto no tiene ganador.
+    // Un premio por nominaciones sin ningún «Sí» no tiene ganador.
     const noWinner = kind !== 'promedio' && top.primary === 0;
     return {
       rows,

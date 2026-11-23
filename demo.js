@@ -54,13 +54,5 @@
         await store.saveEvaluation(ev);
       }
     }
-    // Voto del público: 60 dispositivos, con más votos para los equipos mejor calificados.
-    const weights = TEAMS.map((t) => t[4] * t[4]);
-    const sum = weights.reduce((a, b) => a + b, 0);
-    for (let i = 0; i < 60; i++) {
-      let r = Math.random() * sum; let ti = 0;
-      while (ti < weights.length - 1 && r > weights[ti]) { r -= weights[ti]; ti++; }
-      await store.saveVote({ ...evField, id: 'demovoter' + i, voterId: 'demovoter' + i, teamId: teams[ti].id, createdAt: now, updatedAt: now });
-    }
   };
 })();

@@ -110,7 +110,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 .chip { display: inline-block; background: var(--fill-2); color: var(--muted); font-size: .76rem; font-weight: 600; padding: 3px 11px; border-radius: 999px; }
 .check { display: flex; gap: 12px; align-items: center; margin: 18px 0; } .check input { width: 22px; height: 22px; accent-color: var(--accent); padding: 0; }
 
-/* página del juez / público */
+/* página del juez */
 .team-card h1 { margin: 12px 0 4px; }
 .team-card .chip { background: var(--accent-soft); color: var(--accent); }
 .members { margin: 6px 0 0; padding-left: 20px; color: var(--ink); }
@@ -141,7 +141,6 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   border-top: 1px solid var(--line); padding: 14px 20px calc(14px + env(safe-area-inset-bottom)); margin: 0 -16px; z-index: 4;
 }
 .total { font-size: 1.05rem; color: var(--muted); } .total b { font-size: 1.6rem; color: var(--ink); letter-spacing: -0.03em; }
-#voteSel { font-weight: 600; color: var(--ink); }
 .done .check { display: block; width: 76px; height: 76px; line-height: 76px; margin: 0 auto 18px; border-radius: 50%; background: var(--good-soft); color: var(--good); font-size: 2.2rem; }
 
 /* administrador */
@@ -150,7 +149,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   padding: 12px 24px; background: var(--material); -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
   border-bottom: 1px solid var(--line);
 }
-.brand b { display: block; font-size: 1.05rem; letter-spacing: -0.02em; } .brand span { font-size: .75rem; color: var(--muted); }
+.brand b { display: block; font-size: 1.05rem; letter-spacing: -0.02em; } .brand b + span { font-size: .75rem; color: var(--muted); }
 .brand { min-width: 0; }
 .tabs { display: flex; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .who { margin-left: auto; flex: none; }
@@ -173,7 +172,7 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
   .card { padding: 24px 20px; }
 }
 @media (max-width: 420px) {
-  .brand span { display: none; }
+  .brand b + span { display: none; }
   .demo-pill { font-size: .7rem; padding: 3px 10px; }
 }
 .tabs::-webkit-scrollbar { display: none; }
@@ -256,6 +255,7 @@ details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; color
 .modal-body { padding: 32px; overflow-y: auto; max-height: 90vh; }
 .qr-modal { text-align: center; } .qr-big { width: min(320px, 70vw); margin: 0 auto 18px; background: #fff; border-radius: 20px; padding: 12px; } .qr-big svg { width: 100%; height: auto; display: block; }
 .qr-modal .url { font-size: .8rem; margin: 14px 0; text-align: center; }
+.qr-modal .logo.md { margin: 0 auto 6px; } .qr-modal .qr-event { margin: 0 0 14px; font-size: .9rem; }
 .stack-form .row { margin: 0; }
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); background: rgb(29 29 31 / 88%); color: #fff;
@@ -272,6 +272,7 @@ details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; color
   #print-sheet { display: grid !important; grid-template-columns: repeat(2, 1fr); gap: 10mm; padding: 6mm; }
   .qr-card { break-inside: avoid; border: 1.5px solid #333; border-radius: 6mm; padding: 6mm; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 2mm; color: #000; }
   .qr-card .qr-svg { width: 62mm; } .qr-card .qr-svg svg { width: 100%; height: auto; }
+  .qr-card .logo { width: 16mm; height: auto; }
   .qr-card b { font-size: 15pt; } .qr-card span { font-size: 11pt; } .qr-card small { font-size: 9pt; color: #555; }
 }
 
@@ -279,7 +280,7 @@ details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; color
 .logo { display: block; height: auto; flex: none; }
 .logo.sm { width: 44px; } .logo.md { width: 84px; margin: 0 auto 10px; } .logo.lg { width: 150px; margin: 0 auto 14px; }
 .brandbar { display: flex; align-items: center; gap: 12px; margin: 10px 6px 16px; }
-.brandbar span { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); font-weight: 600; }
+.brandbar > span:not(.logo-slot) { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); font-weight: 600; }
 .topbar .brand { display: flex; align-items: center; gap: 12px; }
 .who-mail { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -446,4 +447,180 @@ body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100
   .ed-level input:nth-child(3) { grid-column: 1 / -1; grid-row: 2; }
 }
 .ev-bar[hidden] { display: none; }
+
+/* Panel en pantallas angostas. Va al final para ganar a las reglas base de arriba. */
+.topbar .brand > div { min-width: 0; }
+.brand b { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 860px) {
+  .brand { flex: 1 1 0; }
+}
+@media (max-width: 520px) {
+  /* El nombre de la evaluación ocupa hasta dos líneas en lugar de encimarse con el estado. */
+  .brand b { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; font-size: .95rem; }
+  .topbar .brand { gap: 10px; }
+  .topbar .logo { width: 40px; flex: none; }
+  .who .btn.sm { padding: 6px 10px; }
+  .kpis, .kpis.small { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .kpi { padding: 16px 18px; border-radius: 20px; }
+  .kpi b { font-size: 1.7rem; }
+  .ev-bar { gap: 10px; }
+  .ev-bar label.inline { flex: 1 1 100%; flex-wrap: nowrap; min-width: 0; }
+  .ev-bar label.inline select { flex: 1; min-width: 0; width: 100%; }
+  /* Dos botones por fila; el que no cabe en una línea pasa solo a su propia fila. */
+  .toolbar > .btn { flex: 1 1 calc(50% - 5px); white-space: nowrap; padding-left: 12px; padding-right: 12px; }
+  .toolbar > select, .toolbar > .search, .toolbar > label.inline { flex: 1 1 100%; max-width: none; }
+  .toolbar > label.inline select { flex: 1; width: 100%; }
+  .state-card { padding: 18px 20px; }
+  /* Editor de rúbrica: más ancho para escribir en cada nivel. */
+  .ed-item { padding: 14px; }
+  .ed-level { grid-template-columns: minmax(0, 1fr) 64px auto; gap: 6px; }
+  .ed-level input { padding-left: 12px; padding-right: 8px; }
+  h3 .weight { display: block; margin: 4px 0 0; }
+  /* Ranking: la barra baja a su propia línea para no empujar los números fuera de la pantalla. */
+  .toplist.wide li { grid-template-columns: 22px minmax(0, 1fr) auto auto; gap: 6px 10px; }
+  .toplist.wide .bar { grid-column: 2 / -1; grid-row: 2; }
+}
+/* Equipos: en celular cada fila es una tarjeta, así los botones QR/Editar quedan a la vista. */
+@media (max-width: 640px) {
+  .team-tbl thead { display: none; }
+  .team-tbl, .team-tbl tbody { display: block; }
+  .team-tbl tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 16px 18px; border-top: 1px solid var(--line); }
+  .team-tbl tr:first-child { border-top: 0; }
+  .team-tbl td { display: block; padding: 0; border: 0; }
+  .team-tbl tr:hover td { background: none; }
+  .team-tbl td:nth-child(1) { grid-column: 1; }
+  .team-tbl td:nth-child(2) { grid-column: 2; grid-row: 1; text-align: right; color: var(--muted); font-weight: 600; }
+  .team-tbl td:nth-child(3) { grid-column: 1 / -1; }
+  .team-tbl td:nth-child(4) { grid-column: 1 / -1; max-width: none; }
+  .team-tbl td:nth-child(5) { grid-column: 1 / -1; }
+  .team-tbl td.actions { grid-column: 1 / -1; text-align: left; white-space: normal; display: flex; flex-wrap: wrap; gap: 8px; }
+  .team-tbl td.actions .btn { flex: 1 1 0; }
+}
+/* Menú de hamburguesa del panel: en celulares y tablets las secciones se abren como lista. */
+.menu-btn, .menu-foot { display: none; }
+@media (max-width: 1024px) {
+  .topbar { flex-wrap: nowrap; gap: 10px; }
+  .brand { flex: 1 1 0; }
+  .who { margin-left: auto; }
+  .who-mail, .who [data-logout] { display: none; }
+  .menu-btn {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 44px; height: 44px; border: 0; border-radius: 12px; background: var(--fill); color: var(--ink); cursor: pointer;
+  }
+  .menu-btn:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+  /* Dos íconos dibujados aparte (☰ y ✕) que se cruzan con un giro: la ✕ queda simétrica y centrada. */
+  .menu-btn { position: relative; }
+  .menu-btn svg {
+    position: absolute; top: 50%; left: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+    fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+    transition: transform .25s ease-out, opacity .2s ease-out;
+  }
+  .menu-btn .ic-close { opacity: 0; transform: rotate(-90deg) scale(.6); }
+  .menu-open .menu-btn .ic-menu { opacity: 0; transform: rotate(90deg) scale(.6); }
+  .menu-open .menu-btn .ic-close { opacity: 1; transform: none; }
+  .tabs {
+    display: none; position: absolute; top: 100%; left: 0; right: 0; margin: 0;
+    flex-direction: column; gap: 4px; padding: 10px 12px 14px;
+    background: var(--card); border-bottom: 1px solid var(--line); box-shadow: 0 18px 40px rgb(0 0 0 / 22%);
+    max-height: calc(100dvh - 80px); overflow-y: auto; -webkit-mask-image: none; mask-image: none;
+  }
+  .menu-open .tabs { display: flex; animation: menuIn .2s ease-out; }
+  .tabs button { text-align: left; padding: 14px 16px; border-radius: 12px; font-size: 1rem; }
+  .menu-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin-top: 6px; padding: 14px 4px 2px 16px; border-top: 1px solid var(--line); font-size: .85rem; color: var(--muted);
+  }
+  .menu-foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .menu-foot .btn { flex: none; }
+}
+/* En tablet el menú es un panel a la derecha en lugar de ocupar todo el ancho. */
+@media (min-width: 600px) and (max-width: 1024px) {
+  .topbar { padding-left: 24px; padding-right: 24px; }
+  .tabs { left: auto; right: 16px; width: 340px; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 var(--r-lg) var(--r-lg); }
+}
+/* En tablet el buscador va en su propia línea para que se lea completo. */
+@media (max-width: 1024px) {
+  .toolbar > .search { flex: 1 1 100%; max-width: none; }
+}
+@keyframes menuIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .menu-open .tabs { animation: none; } .menu-btn svg { transition: none; } }
 h3 .weight { font-size: .78rem; font-weight: 600; color: var(--accent); margin-left: 8px; letter-spacing: 0; }
+
+/* Logos por carrera (LAD / LAGE). El contenedor no altera el acomodo; con las dos carreras van lado a lado. */
+.logo-slot { display: contents; }
+.logo-pair { display: flex; align-items: center; justify-content: center; gap: 12px; flex: none; }
+.logo-pair .logo { margin: 0; }
+.logo-pair .logo.lg { width: 120px; }
+.logo-pair .logo.md { width: 64px; }
+.state .logo-pair, .hero .logo-pair { margin: 0 auto 14px; }
+.prog-pick { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.prog-pick legend { font-weight: 600; margin-bottom: 8px; padding: 0; }
+.prog-pick small { grid-column: 1 / -1; color: var(--muted); }
+.prog-pick label {
+  position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer;
+  background: var(--fill); border: 2px solid transparent; border-radius: var(--r-md); transition: border-color .2s ease-out, background .2s ease-out;
+}
+.prog-pick label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.prog-pick label:has(input:focus-visible) { outline: 3px solid var(--accent-soft); outline-offset: 2px; }
+.prog-pick input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; margin: 0; padding: 0; opacity: 0; pointer-events: none; }
+.prog-pick .logo { width: 48px; }
+.prog-pick b { font-size: 1.05rem; }
+
+/* Celular: «En vivo» queda solo como el punto que parpadea, para dejarle espacio al nombre de la evaluación.
+   El texto sigue ahí para lectores de pantalla. Los avisos (Sin red, Sin datos, Demo) conservan su texto. */
+@media (max-width: 520px) {
+  .who .status.on { position: relative; width: 30px; height: 30px; padding: 0; gap: 0; justify-content: center; }
+  .who .status.on i { width: 10px; height: 10px; }
+  .who .status.on > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+/* Celulares muy angostos (≈320 px): el nombre puede usar una tercera línea antes de recortarse. */
+@media (max-width: 360px) {
+  .brand b { -webkit-line-clamp: 3; font-size: .88rem; }
+}
+
+/* Listas desplegables con la estética del sitio. Usa el select personalizable de los navegadores que lo
+   admiten (Chrome/Edge recientes): sigue siendo un <select> normal para teclado, lectores y celulares.
+   Los demás navegadores muestran la lista del sistema. */
+@supports (appearance: base-select) {
+  select, ::picker(select) { appearance: base-select; }
+  select { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; text-align: left; }
+  select:hover { background: var(--fill-2); }
+  .ed-item select:hover { background: var(--fill); }
+  /* Sobre el fondo de la página (no dentro de una tarjeta) el campo necesita su propia tarjeta para verse. */
+  .ev-bar select, .toolbar select { background: var(--card); border-color: var(--line); box-shadow: var(--shadow); }
+  .ev-bar select:hover, .toolbar select:hover { border-color: var(--line-strong); }
+  select::picker-icon {
+    content: ''; flex: none; width: 8px; height: 8px; margin: 0 4px 4px 0;
+    border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+    transform: rotate(45deg); transition: transform .25s ease-out, margin .25s ease-out;
+  }
+  select:open::picker-icon { transform: rotate(225deg); margin: 4px 4px 0 0; }
+  select:open { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); background: var(--card); }
+  ::picker(select) {
+    margin-block: 8px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-md);
+    background: var(--card); color: var(--ink); box-shadow: 0 18px 50px rgb(0 0 0 / 18%);
+    min-inline-size: anchor-size(self-inline); max-inline-size: calc(100vw - 32px); max-block-size: min(60vh, 420px);
+    opacity: 0; transform: translateY(-4px) scale(.98); transform-origin: top center;
+    transition: opacity .18s ease-out, transform .18s ease-out, overlay .18s allow-discrete, display .18s allow-discrete;
+  }
+  ::picker(select):popover-open { opacity: 1; transform: none; }
+  @starting-style { ::picker(select):popover-open { opacity: 0; transform: translateY(-4px) scale(.98); } }
+  option {
+    display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: var(--r-sm);
+    font-size: .95rem; line-height: 1.3; white-space: normal; cursor: pointer; color: var(--ink); background: transparent;
+  }
+  option:hover, option:focus-visible { background: var(--fill-2); outline: none; }
+  option:checked { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  option::checkmark { order: 1; margin-left: auto; content: '✓'; color: var(--accent); font-weight: 700; }
+  option + option { margin-top: 2px; }
+}
+@media (prefers-reduced-motion: reduce) { ::picker(select), select::picker-icon { transition: none; } }
+
+/* Computadora con poco espacio (nombre largo o ventana angosta): las pestañas bajan a su propia fila
+   en lugar de recortarse. La clase la pone fitTabs() en app.js solo cuando no caben. */
+@media (min-width: 1025px) {
+  .topbar.tabs-below { flex-wrap: wrap; row-gap: 6px; padding-bottom: 8px; }
+  .topbar.tabs-below .brand { flex: 1 1 0; }
+  .topbar.tabs-below .who { order: 2; }
+  .topbar.tabs-below .tabs { order: 3; flex: 1 1 100%; justify-content: center; overflow-x: visible; }
+}

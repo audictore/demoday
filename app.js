@@ -21,12 +21,34 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n, d = 1) => Number(n).toFixed(d);
   const pct = (p) => Math.round(p * 100) + '%';
-  const newVoterId = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : newId() + newId() + newId() + newId());
   const teamLine = (t) => [t.group, t.category].filter(Boolean).join(' · ');
+  // Carrera de cada evaluación: decide qué logo se muestra. Sin evaluación abierta (inicio) se ven los dos.
+  const PROGRAMS = {
+    LAD: { alt: 'Logo de LAD', sm: ['assets/logo-sm.png', 176, 160], lg: ['assets/logo.png', 320, 291] },
+    LAGE: { alt: 'Logo de LAGE, Licenciatura en Administración y Gestión Empresarial', sm: ['assets/logo-lage.svg', 112, 112], lg: ['assets/logo-lage.svg', 112, 112] },
+  };
+  const programOf = (s) => (s && PROGRAMS[s.program] ? s.program : 'LAD');
+  let program = null;
+  const oneLogo = (p, cls) => {
+    const [src, w, h] = cls === 'lg' ? PROGRAMS[p].lg : PROGRAMS[p].sm;
+    return `<img class="logo ${cls} logo-${p.toLowerCase()}" src="${src}" alt="${PROGRAMS[p].alt}" width="${w}" height="${h}">`;
+  };
+  const logoInner = (cls) => (program ? oneLogo(program, cls) : `<span class="logo-pair">${oneLogo('LAD', cls)}${oneLogo('LAGE', cls)}</span>`);
   // El logo grande solo se usa en el inicio; el resto de las vistas usa la versión ligera.
-  const logoImg = (cls = '') => (cls === 'lg'
-    ? '<img class="logo lg" src="assets/logo.png" alt="Logo de la carrera de Administración" width="320" height="291">'
-    : `<img class="logo ${cls}" src="assets/logo-sm.png" alt="Logo de la carrera de Administración" width="176" height="160">`);
+  const logoImg = (cls = '') => `<span class="logo-slot" data-size="${cls}">${logoInner(cls)}</span>`;
+  const evLabel = (e) => `${programOf(e)} · ${e.eventName}`;
+  /** Selector de carrera con su logo (para crear una evaluación y en Ajustes). */
+  const programPicker = (cur) => `
+    <fieldset class="prog-pick"><legend>Carrera</legend>
+      ${Object.keys(PROGRAMS).map((p) => `<label><input type="radio" name="program" value="${p}" ${p === cur ? 'checked' : ''}>${oneLogo(p, '')}<b>${p}</b></label>`).join('')}
+      <small>Define el logo que ven los jueces, el panel y el pie de página.</small>
+    </fieldset>`;
+  /** Cambia la carrera de la vista actual y actualiza todos los logos visibles, incluido el del pie. */
+  function setProgram(p) {
+    if (p === program) return;
+    program = p;
+    document.querySelectorAll('.logo-slot').forEach((el) => { el.innerHTML = logoInner(el.dataset.size); });
+  }
   // `short`: texto reducido que se usa en pantallas muy angostas.
   const statusPill = (tone, label, pulse, short) => `<span class="status ${tone}${pulse ? ' pulse' : ''}"><i></i>${short
     ? `<span class="full">${esc(label)}</span><span class="short">${esc(short)}</span>` : esc(label)}</span>`;
@@ -106,18 +128,53 @@
     const q = qrcode(0, 'M'); q.addData(text); q.make();
     return q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
   }
-  function svgToPngBlob(svgMarkup, size = 900) {
-    return new Promise((res) => {
-      const svg = svgMarkup.includes('xmlns') ? svgMarkup : svgMarkup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-      const img = new Image();
-      img.onload = () => {
-        const c = document.createElement('canvas'); c.width = c.height = size;
-        const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size, size);
-        ctx.imageSmoothingEnabled = false; ctx.drawImage(img, 0, 0, size, size);
-        c.toBlob(res, 'image/png');
-      };
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-    });
+  const loadImg = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('No se pudo cargar ' + src)); i.src = src; });
+
+  /** Tarjeta PNG para imprimir o compartir: logo de la carrera, evaluación, QR, equipo y grupo. */
+  async function qrCardPng(team, svgMarkup) {
+    const W = 1200, PAD = 90, INNER = W - PAD * 2, QR = 820;
+    const FONT = '-apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+    const svg = svgMarkup.includes('xmlns') ? svgMarkup : svgMarkup.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+    const p = programOf(state.settings);
+    const [qr, logo] = await Promise.all([
+      loadImg('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)),
+      loadImg(PROGRAMS[p].lg[0]).catch(() => null),
+    ]);
+    const c = document.createElement('canvas'), ctx = c.getContext('2d');
+    // Parte el texto en renglones que quepan en el ancho; corta palabras demasiado largas.
+    const lines = (text, font, max, limit) => {
+      ctx.font = font; const out = []; let cur = '';
+      for (const w of String(text || '').split(/\s+/).filter(Boolean)) {
+        const next = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(next).width <= max) cur = next; else { if (cur) out.push(cur); cur = w; }
+      }
+      if (cur) out.push(cur);
+      if (out.length > limit) { out.length = limit; out[limit - 1] = out[limit - 1].replace(/\s*\S*$/, '') + '…'; }
+      return out;
+    };
+    const eventFont = `600 40px ${FONT}`, teamFont = `800 76px ${FONT}`, groupFont = `500 44px ${FONT}`, noteFont = `500 32px ${FONT}`;
+    const eventLines = lines(state.settings.eventName, eventFont, INNER, 3);
+    const teamLines = lines(team.name, teamFont, INNER, 3);
+    const groupText = [team.group && `Grupo ${team.group}`, team.stand && `Stand ${team.stand}`].filter(Boolean).join(' · ');
+    const LOGO = logo ? 240 : 0;
+    const H = PAD + LOGO + (logo ? 36 : 0) + eventLines.length * 52 + 40 + QR + 50 + teamLines.length * 88 + (groupText ? 64 : 0) + 30 + 44 + PAD;
+    c.width = W; c.height = H;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    let y = PAD;
+    if (logo) {
+      const ratio = logo.naturalWidth && logo.naturalHeight ? logo.naturalWidth / logo.naturalHeight : 1;
+      const lw = LOGO * ratio; ctx.drawImage(logo, (W - lw) / 2, y, lw, LOGO); y += LOGO + 36;
+    }
+    ctx.fillStyle = '#6e6e73'; ctx.font = eventFont;
+    eventLines.forEach((l) => { ctx.fillText(l, W / 2, y); y += 52; });
+    y += 40;
+    ctx.imageSmoothingEnabled = false; ctx.drawImage(qr, (W - QR) / 2, y, QR, QR); y += QR + 50;
+    ctx.fillStyle = '#1d1d1f'; ctx.font = teamFont;
+    teamLines.forEach((l) => { ctx.fillText(l, W / 2, y); y += 88; });
+    if (groupText) { ctx.fillStyle = '#3a3a3c'; ctx.font = groupFont; ctx.fillText(groupText, W / 2, y + 6); y += 64; }
+    y += 30; ctx.fillStyle = '#86868b'; ctx.font = noteFont; ctx.fillText('Escanea para evaluar este proyecto', W / 2, y);
+    return new Promise((res) => c.toBlob(res, 'image/png'));
   }
 
   const isLocalUrl = (u) => /^file:|\/\/(localhost|127\.0\.0\.1)/.test(u);
@@ -135,7 +192,6 @@
   // Los QR del Demo Day conservan su formato original; las demás evaluaciones llevan su identificador.
   const eventPath = () => (state.eventId === DEFAULT_EVENT ? '' : `/${state.eventId}`);
   const teamUrl = (settings, team) => `${baseUrl(settings)}#/e${eventPath()}/${team.id}`;
-  const voteUrl = (settings) => `${baseUrl(settings)}#/voto${eventPath()}`;
   const slug = (s) => norm(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'equipo';
   const fmtDate = (ms) => (ms ? new Date(ms).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '');
 
@@ -144,12 +200,13 @@
     cleanups.forEach((f) => { try { f(); } catch (e) { /* noop */ } });
     cleanups = [];
     document.body.classList.remove('is-admin');
+    setProgram(null); // cada vista elige su carrera en cuanto sabe qué evaluación muestra
     const h = location.hash.replace(/^#\/?/, '');
     const [a, b, c] = h.split('/');
     window.scrollTo(0, 0);
     if (a === 'e' && c) return viewEval(c, b);
     if (a === 'e' && b) return viewEval(b, DEFAULT_EVENT);
-    if (a === 'voto') return viewVoto(b || DEFAULT_EVENT);
+    if (a === 'voto') { app.innerHTML = stateScreen('off', '🔒', 'Sin votación del público', 'Esta evaluación ya no tiene votación del público. Solo califican los jueces.'); return undefined; }
     if (a === 'admin') return viewAdmin();
     return viewHome();
   }
@@ -164,7 +221,6 @@
           <h1>Evaluación de proyectos</h1>
           <p class="muted">Sistema de evaluación por código QR</p>
           <p><b>Jueces:</b> escaneen el código QR del stand del equipo que van a evaluar.</p>
-          <p><b>Público:</b> escanea el QR general para votar por tu proyecto favorito.</p>
           <p><a class="btn primary" href="#/admin">Acceso de administrador</a></p>
           ${store.mode === 'local' ? '<p class="note">Modo demostración: los datos viven solo en este navegador. Configura <code>firebase-config.js</code> para usarlo en el evento.</p>' : ''}
         </div>
@@ -174,7 +230,7 @@
   /* ============================ EVALUACIÓN (QR) ============================ */
   const eventMissingScreen = () => stateScreen('bad', '?', 'Evaluación no encontrada', 'Este código QR no corresponde a ninguna evaluación activa. Avisa a los organizadores.');
 
-  /** Prepara la evaluación indicada para jueces y público. Devuelve false si ya no existe. */
+  /** Prepara la evaluación indicada para los jueces. Devuelve false si ya no existe. */
   async function loadEvent(eventId) {
     await store.init();
     store.useEvent(eventId);
@@ -194,6 +250,7 @@
       app.innerHTML = `<div class="wrap narrow"><div class="card"><h2>No se pudo cargar</h2><p>${esc(e.message)}</p></div></div>`;
       return;
     }
+    setProgram(programOf(settings));
     if (!team) {
       app.innerHTML = store.mode === 'local'
         ? stateScreen('warn', '!', 'Sistema en modo demostración', 'Esta página todavía no está conectada a una base de datos compartida, así que este teléfono no conoce al equipo. Avisa a los organizadores.')
@@ -382,99 +439,12 @@
     });
   }
 
-  /* ======================== VOTO DEL PÚBLICO (QR general) ======================== */
-  async function viewVoto(eventId = DEFAULT_EVENT) {
-    app.innerHTML = '<div class="wrap narrow"><div class="card center">Cargando…</div></div>';
-    let teams, settings;
-    try {
-      if (!await loadEvent(eventId)) { app.innerHTML = eventMissingScreen(); return; }
-      [teams, settings] = await Promise.all([store.getTeams(), store.getSettings()]);
-    } catch (e) {
-      app.innerHTML = `<div class="wrap narrow"><div class="card"><h2>No se pudo cargar</h2><p>${esc(e.message)}</p></div></div>`;
-      return;
-    }
-    if (!settings.votingOpen) {
-      app.innerHTML = stateScreen('off', '🔒', 'Votación cerrada', `La votación del público de ${esc(settings.eventName)} ya terminó. ¡Gracias por participar!`);
-      return;
-    }
-    if (!teams.length) {
-      app.innerHTML = store.mode === 'local'
-        ? stateScreen('warn', '!', 'Sistema en modo demostración', 'Esta página todavía no está conectada a una base de datos compartida, así que no hay proyectos para votar. Avisa a los organizadores.')
-        : stateScreen('off', '…', 'Aún no hay proyectos', 'Todavía no se registran proyectos para votar. Inténtalo de nuevo en unos minutos.');
-      return;
-    }
-    let voterId = safeLS.get('dd_voter');
-    if (!voterId) { voterId = newVoterId(); safeLS.set('dd_voter', voterId); }
-    let current = null;
-    try { current = await store.getVote(voterId); } catch (e) { /* sin voto previo */ }
-
-    const order = (c) => { const i = CATEGORIES.indexOf(c); return i < 0 ? 99 : i; };
-    const cats = [...new Set(teams.map((t) => t.category || 'Otros'))].sort((a, b) => order(a) - order(b) || a.localeCompare(b));
-    app.innerHTML = `
-      <div class="wrap narrow">
-        ${brandbar(settings.eventName + ' · Premio del Público')}
-        ${pendingBannerHtml()}
-        <form id="voteForm">
-          <section class="card">
-            <h1>Vota por tu proyecto favorito</h1>
-            <p class="muted">Elige un solo proyecto. Si cambias de opinión, puedes volver a entrar y cambiar tu voto mientras la votación siga abierta.</p>
-            <p id="voteBanner">${current ? '<span class="banner">Ya votaste. Puedes cambiar tu voto si lo deseas.</span>' : ''}</p>
-          </section>
-          ${cats.map((cat) => `
-            <section class="card">
-              <h2>${esc(cat)}</h2>
-              ${teams.filter((t) => (t.category || 'Otros') === cat).sort((a, b) => a.name.localeCompare(b.name)).map((t) => `
-                <label class="opt">
-                  <input type="radio" name="vote" value="${esc(t.id)}" ${current && current.teamId === t.id ? 'checked' : ''}>
-                  <span class="opt-body"><span class="opt-top"><b>${esc(t.name)}</b>${t.stand ? `<em>Stand ${esc(t.stand)}</em>` : ''}</span>
-                  <small>${esc(t.group || '')}</small></span>
-                </label>`).join('')}
-            </section>`).join('')}
-          <div class="submitbar"><div class="total" id="voteSel">Elige un proyecto</div><button class="btn primary" id="voteBtn" type="submit">Enviar voto</button></div>
-          <p class="error" id="voteErr" hidden></p>
-        </form>
-      </div>`;
-    const form = $('#voteForm');
-    const label = () => {
-      const r = form.querySelector('input[name=vote]:checked');
-      $('#voteSel').textContent = r ? (teams.find((t) => t.id === r.value) || {}).name : 'Elige un proyecto';
-    };
-    form.addEventListener('change', label); label();
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const r = form.querySelector('input[name=vote]:checked');
-      const err = $('#voteErr'); err.hidden = true;
-      if (!r) { err.textContent = 'Elige un proyecto para votar.'; err.hidden = false; return; }
-      const btn = $('#voteBtn'); btn.disabled = true; btn.textContent = 'Enviando…';
-      const now = Date.now();
-      try {
-        const vote = { ...store.eventField(), id: voterId, voterId, teamId: r.value, createdAt: (current && current.createdAt) || now, updatedAt: now };
-        const res = await window.DD.outbox.submit('vote', vote);
-        const t = teams.find((x) => x.id === r.value);
-        app.innerHTML = `
-          <div class="wrap narrow"><div class="card center done">
-            <div class="check">✓</div><h2>${res.status === 'queued' ? 'Voto guardado' : '¡Voto registrado!'}</h2>
-            ${queuedNoteHtml(res, 'voto')}
-            <p>Votaste por <b>${esc(t.name)}</b></p>
-            <p class="muted">Gracias por participar en el Premio del Público.</p>
-            <button class="btn ghost" id="changeVote">Cambiar mi voto</button>
-          </div></div>`;
-        $('#changeVote').onclick = () => viewVoto(eventId);
-        watchQueued(res, 'vote', vote, 'voto');
-        window.scrollTo(0, 0);
-      } catch (ex) {
-        btn.disabled = false; btn.textContent = 'Enviar voto';
-        err.textContent = 'No se pudo registrar tu voto: ' + ex.message; err.hidden = false;
-      }
-    });
-  }
-
   /* =============================== ADMIN =============================== */
   const TABS = [
     ['ganadores', 'Ganadores'], ['estadisticas', 'Estadísticas'], ['equipos', 'Equipos y QR'],
     ['observaciones', 'Observaciones'], ['evaluaciones', 'Jueces'], ['rubrica', 'Rúbrica'], ['ajustes', 'Ajustes'],
   ].filter(([id]) => id !== 'rubrica' || store.supportsEvents);
-  const state = { eventId: DEFAULT_EVENT, events: [], teams: [], evals: [], votes: [], settings: { open: true, votingOpen: true, baseUrl: '', eventName: 'Demo Day 2026' }, tab: safeLS.get('dd_tab') || 'ganadores', evalError: null };
+  const state = { eventId: DEFAULT_EVENT, events: [], teams: [], evals: [], settings: { open: true, baseUrl: '', eventName: 'Demo Day 2026' }, tab: safeLS.get('dd_tab') || 'ganadores', evalError: null };
   let currentTab = null; // { update() }
   let stopData = null, openToken = 0;
 
@@ -509,17 +479,54 @@
     };
   }
 
+  /** En computadora, si las pestañas no caben junto al nombre y la sesión, pasan a una segunda fila completa.
+      En celular y tablet no aplica: ahí se usa el menú de hamburguesa. */
+  function fitTabs() {
+    const bar = $('#topbar'), tabs = $('#tabs'), name = $('#evName'), btn = $('#menuBtn');
+    if (!bar || !tabs) return;
+    bar.classList.remove('tabs-below');
+    if (btn && getComputedStyle(btn).display !== 'none') return;
+    const squeezed = (el) => el && el.scrollWidth > el.clientWidth + 1;
+    if (squeezed(tabs) || squeezed(name)) bar.classList.add('tabs-below');
+  }
+
   function renderAdminShell(user) {
+    const session = store.mode !== 'local';
     app.innerHTML = `
-      <header class="topbar">
+      <header class="topbar" id="topbar">
         <div class="brand">${logoImg('sm')}<div><b id="evName">${esc(state.settings.eventName)}</b><span>Panel de evaluación</span></div></div>
-        <nav class="tabs" id="tabs">${TABS.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join('')}</nav>
+        <nav class="tabs" id="tabs" aria-label="Secciones del panel">${TABS.map(([id, label]) => `<button data-tab="${id}">${label}</button>`).join('')}
+          ${session ? `<div class="menu-foot"><span>${esc(user.email)}</span><button class="btn sm" data-logout>Cerrar sesión</button></div>` : ''}</nav>
         <div class="who"><span id="livePill"></span>
-          ${store.mode !== 'local' ? `<span class="who-mail">${esc(user.email)}</span><button class="btn ghost sm" id="logoutBtn">Salir</button>` : ''}</div>
+          ${session ? `<span class="who-mail">${esc(user.email)}</span><button class="btn ghost sm" data-logout>Salir</button>` : ''}</div>
+        <button class="menu-btn" id="menuBtn" type="button" aria-label="Abrir menú" aria-expanded="false" aria-controls="tabs">
+          <svg class="ic-menu" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          <svg class="ic-close" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
       </header>
       <main class="admin-main"><div class="ev-bar" id="evBar" hidden></div><div id="tab-content"></div></main>`;
-    const lo = $('#logoutBtn'); if (lo) lo.onclick = () => store.auth.signOut();
-    $('#tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); });
+    $$('[data-logout]').forEach((b) => { b.onclick = () => store.auth.signOut(); });
+
+    // Menú de hamburguesa (solo se ve en pantallas angostas; en computadora las pestañas siguen en fila).
+    const bar = $('#topbar'), menuBtn = $('#menuBtn');
+    const setMenu = (open) => {
+      bar.classList.toggle('menu-open', open);
+      menuBtn.setAttribute('aria-expanded', String(open));
+      menuBtn.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
+      if (open) { const a = $('#tabs [data-tab].active'); if (a) a.focus({ preventScroll: true }); }
+    };
+    menuBtn.onclick = () => setMenu(!bar.classList.contains('menu-open'));
+    $('#tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) { switchTab(b.dataset.tab); setMenu(false); } });
+    const onDocClick = (e) => { if (bar.classList.contains('menu-open') && !bar.contains(e.target)) setMenu(false); };
+    const onKey = (e) => { if (e.key === 'Escape' && bar.classList.contains('menu-open')) { setMenu(false); menuBtn.focus(); } };
+    document.addEventListener('click', onDocClick);
+    document.addEventListener('keydown', onKey);
+    onLeave(() => { document.removeEventListener('click', onDocClick); document.removeEventListener('keydown', onKey); });
+    // Solo reacciona a cambios de ancho (la segunda fila cambia el alto y no debe volver a disparar).
+    let lastW = 0;
+    const ro = new ResizeObserver(([e]) => { const w = Math.round(e.contentRect.width); if (w !== lastW) { lastW = w; fitTabs(); } });
+    ro.observe(bar);
+    onLeave(() => ro.disconnect());
 
     const stop = () => { openToken++; if (stopData) { stopData(); stopData = null; } };
     stop.__data = true;
@@ -543,7 +550,7 @@
     if (stopData) { stopData(); stopData = null; }
     store.useEvent(id);
     state.eventId = id; safeLS.set('dd_event', id);
-    Object.assign(state, { teams: [], evals: [], votes: [], evalError: null, statTeam: null });
+    Object.assign(state, { teams: [], evals: [], evalError: null, statTeam: null });
     let info = null;
     try { info = await store.getEventInfo(); } catch (e) { /* se resuelve abajo */ }
     if (token !== openToken) return;
@@ -552,11 +559,11 @@
     const unsubs = [
       store.onTeams((t) => { state.teams = t; refresh(); }),
       store.onEvaluations((ev) => { state.evals = ev; state.evalError = null; refresh(); }, (err) => { state.evalError = err.message; refresh(); }),
-      store.onVotes((v) => { state.votes = v; refresh(); }, () => { state.votes = []; }),
       store.onSettings((s) => {
         state.settings = s;
-        const n = $('#evName'); if (n) n.textContent = s.eventName;
-        const opt = $(`#evSel option[value="${state.eventId}"]`); if (opt) opt.textContent = s.eventName;
+        setProgram(programOf(s));
+        const n = $('#evName'); if (n && n.textContent !== s.eventName) { n.textContent = s.eventName; fitTabs(); }
+        const opt = $(`#evSel option[value="${state.eventId}"]`); if (opt) opt.textContent = evLabel(s);
         refresh();
       }),
     ];
@@ -569,7 +576,7 @@
     const bar = $('#evBar'); if (!bar || !store.supportsEvents) return;
     bar.hidden = false;
     bar.innerHTML = `
-      <label class="inline">Evaluación: <select id="evSel">${state.events.map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? 'selected' : ''}>${esc(e.eventName)}</option>`).join('')}</select></label>
+      <label class="inline">Evaluación: <select id="evSel">${state.events.map((e) => `<option value="${esc(e.id)}" ${e.id === state.eventId ? 'selected' : ''}>${esc(evLabel(e))}</option>`).join('')}</select></label>
       <button class="btn sm" id="evNew">+ Nueva evaluación</button>`;
     $('#evSel').onchange = (e) => openEvent(e.target.value);
     $('#evNew').onclick = newEventDialog;
@@ -589,6 +596,7 @@
       <h3>Nueva evaluación</h3>
       <form id="evForm" class="stack-form">
         <label class="field"><span>Nombre</span><input name="name" required maxlength="80" placeholder="Ej. Proyecto integrador 7.º cuatrimestre"></label>
+        ${programPicker(programOf(state.settings))}
         <label class="check"><input type="radio" name="base" value="copy" checked> Copiar rúbrica, premios y preguntas de «${esc(state.settings.eventName)}»</label>
         <label class="check"><input type="radio" name="base" value="blank"> Empezar con una plantilla sencilla</label>
         <p class="muted">Tendrá sus propios equipos, QR, evaluaciones y resultados.</p>
@@ -598,7 +606,7 @@
       e.preventDefault(); const f = e.target; const name = f.name.value.trim(); if (!name) return;
       const config = f.base.value === 'copy' ? window.DD.validateConfig(editableConfig()).config : window.DD.blankConfig();
       try {
-        const id = await store.createEvent(name, config);
+        const id = await store.createEvent(name, config, f.program.value);
         await reloadEvents(); d.close(); state.tab = 'rubrica'; openEvent(id); toast('Evaluación creada');
       } catch (ex) { toast('No se pudo crear: ' + ex.message, 'bad'); }
     };
@@ -619,7 +627,7 @@
     raf = requestAnimationFrame(() => { updateLive(); if (currentTab) currentTab.update(); });
   }
 
-  /** Estado del evento: tarjetas con interruptor para abrir/cerrar evaluaciones y votación. */
+  /** Estado del evento: tarjeta con interruptor para abrir/cerrar las evaluaciones. */
   function eventStatusHtml() {
     const s = state.settings;
     const card = (key, open, title, onHelp, offHelp, onTxt, offTxt) => `
@@ -629,14 +637,16 @@
       </div>`;
     return `<div class="statusgrid">
       ${card('open', s.open, 'Evaluaciones de jueces', 'Los jueces pueden enviar y corregir evaluaciones.', 'Ya no se aceptan evaluaciones nuevas ni cambios.', 'Abiertas', 'Cerradas')}
-      ${card('votingOpen', s.votingOpen, 'Votación del público', 'El público puede votar con el QR general.', 'La votación está cerrada.', 'Abierta', 'Cerrada')}
     </div>`;
   }
 
   function switchTab(id) {
     state.tab = id; safeLS.set('dd_tab', id);
-    $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === id));
-    const act = $('#tabs button.active'), strip = $('#tabs');
+    $$('#tabs [data-tab]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.tab === id);
+      if (b.dataset.tab === id) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    });
+    const act = $('#tabs [data-tab].active'), strip = $('#tabs');
     if (act && strip) strip.scrollLeft = act.offsetLeft - (strip.clientWidth - act.offsetWidth) / 2;
     const el = $('#tab-content'); if (!el) return;
     const views = { ganadores: tabGanadores, estadisticas: tabEstadisticas, equipos: tabEquipos, observaciones: tabObservaciones, evaluaciones: tabEvaluaciones, rubrica: tabRubrica, ajustes: tabAjustes };
@@ -650,7 +660,7 @@
   function derived() {
     const ids = new Set(state.teams.map((t) => t.id));
     const evals = state.evals.filter((e) => ids.has(e.teamId) && e.scores);
-    const stats = A.allStats(state.teams, evals, state.votes.filter((v) => ids.has(v.teamId)));
+    const stats = A.allStats(state.teams, evals);
     const cats = [...new Set([...CATEGORIES, ...state.teams.map((t) => t.category).filter(Boolean)])]
       .filter((c) => state.teams.some((t) => t.category === c));
     return { evals, stats, cats, global: A.globalStats(stats, evals) };
@@ -660,13 +670,9 @@
 
   const metricTxt = (award, row) => {
     if (award.kind === 'promedio') return `${fmt(row.primary)} pts`;
-    if (award.kind === 'votos') return `${row.primary} voto${row.primary === 1 ? '' : 's'}`;
     return `${row.primary} nominaci${row.primary === 1 ? 'ón' : 'ones'}`;
   };
-  const awardSub = (award, w, g) => {
-    if (award.kind === 'votos') return `de ${g.votes} voto${g.votes === 1 ? '' : 's'} en total`;
-    return `${w.s.n} evaluaci${w.s.n === 1 ? 'ón' : 'ones'}`;
-  };
+  const awardSub = (award, w) => `${w.s.n} evaluaci${w.s.n === 1 ? 'ón' : 'ones'}`;
   const awardVal = (award, v) => (award.kind === 'promedio' ? fmt(v) : v);
 
   /* ======================== TAB: GANADORES ======================== */
@@ -675,8 +681,7 @@
     $('#g-body').addEventListener('click', async (e) => {
       const b = e.target.closest('[data-toggle]'); if (!b) return;
       const key = b.dataset.toggle; const cur = !!state.settings[key];
-      const what = key === 'open' ? 'las evaluaciones de los jueces' : 'la votación del público';
-      if (cur && !(await confirmDialog(`¿Cerrar ${what}? Nadie podrá enviar más hasta que las reabras.`, 'Cerrar'))) return;
+      if (cur && !(await confirmDialog('¿Cerrar las evaluaciones de los jueces? Nadie podrá enviar más hasta que las reabras.', 'Cerrar'))) return;
       try { await store.saveSettings({ [key]: !cur }); toast(cur ? 'Cerrado' : 'Reabierto'); } catch (ex) { toast(ex.message, 'bad'); }
     });
     return {
@@ -694,10 +699,9 @@
             <div class="kpi"><b>${g.evaluations}</b><span>Evaluaciones</span></div>
             <div class="kpi"><b>${g.judges}</b><span>Jueces</span></div>
             <div class="kpi"><b>${g.evaluations ? fmt(g.avgTotal) : '–'}</b><span>Promedio global /${MAX_TOTAL}</span></div>
-            <div class="kpi"><b>${g.votes}</b><span>Votos del público</span></div>
           </div>
           ${missing > 0 ? `<div class="banner">${missing} equipo${missing === 1 ? '' : 's'} aún sin evaluaciones: ${esc(d.stats.filter((s) => !s.n).map((s) => s.team.name).slice(0, 6).join(', '))}${missing > 6 ? '…' : ''}.</div>` : ''}
-          <div class="awards">${wins.map((w) => awardCard(w, g)).join('')}</div>`;
+          <div class="awards">${wins.map((w) => awardCard(w)).join('')}</div>`;
       },
     };
   }
@@ -713,7 +717,7 @@
     return `<p class="tie full">EMPATE sin resolver entre ${names}: requiere deliberación de los docentes.</p>`;
   }
 
-  function awardCard({ award, overall, byCategory }, g) {
+  function awardCard({ award, overall, byCategory }) {
     const w = overall.winner;
     const top = overall.rows.slice(0, 5);
     const maxP = Math.max(1, ...top.map((r) => r.primary));
@@ -723,7 +727,7 @@
         ${w ? `
           <div class="winner">
             <div><b>${esc(w.s.team.name)}</b><span>${esc(w.s.team.group || '')} · ${esc(w.s.team.category || '')}</span></div>
-            <div class="metric">${metricTxt(award, w)}<small>${awardSub(award, w, g)}</small></div>
+            <div class="metric">${metricTxt(award, w)}<small>${awardSub(award, w)}</small></div>
           </div>
           ${tieNote(award, overall)}
           <ol class="toplist">${top.map((r) => `
@@ -932,13 +936,6 @@
             <div class="bar"><i style="width:${Math.round((s.avgTotal / MAX_TOTAL) * 100)}%"></i></div>
             <span class="val">${fmt(s.avgTotal)}</span><span class="ev">${s.n} ev.</span></li>`).join('')}</ol>
       </section>
-      ${g.votes ? `
-      <section class="card"><h3>Voto del público</h3>
-        <ol class="toplist wide">${[...d.stats].sort((a, b) => b.votes - a.votes).map((s, i) => `
-          <li><span class="rk">${i + 1}</span><span class="nm">${esc(s.team.name)}<small>${esc(s.team.category || '')}</small></span>
-            <div class="bar"><i style="width:${Math.round((s.votes / Math.max(1, ...d.stats.map((x) => x.votes))) * 100)}%"></i></div>
-            <span class="val">${s.votes}</span><span class="ev">${Math.round((s.votes / g.votes) * 100)}%</span></li>`).join('')}</ol>
-      </section>` : ''}
       <section class="card"><h3>Por categoría</h3>
         <div class="table-wrap"><table class="tbl"><thead><tr><th>Categoría</th><th>Equipos</th><th>Evaluaciones</th><th>Promedio</th></tr></thead>
         <tbody>${byCat.map((c) => `<tr><td>${esc(c.cat)}</td><td>${c.teams}</td><td>${c.n}</td><td>${c.n ? fmt(c.avg) : '–'}</td></tr>`).join('')}</tbody></table></div>
@@ -1001,10 +998,9 @@
         ${flagged.length ? `<ol class="plain">${flagged.map((c) => `<li><span class="tag ${LEVEL_TXT[c.level][1]}">${LEVEL_TXT[c.level][0]}</span> <b>${esc(c.name)}</b> — promedio ${fmt(c.avg)} de ${c.weight} pts (${pct(c.pct)}).</li>`).join('')}</ol>`
           : '<p>Ningún criterio quedó por debajo de «Bueno» (80 %). Excelente desempeño parejo.</p>'}
       </section>
-      <section class="card"><h3>Nominaciones y votos</h3>
-        <div class="kpis small">${NOMINATIONS.map((n) => `<div class="kpi"><b>${s.noms[n.id]}/${s.n}</b><span>${esc(n.award)}</span></div>`).join('')}
-          <div class="kpi"><b>${s.votes}</b><span>Votos del público</span></div></div>
-      </section>
+      ${NOMINATIONS.length ? `<section class="card"><h3>Nominaciones</h3>
+        <div class="kpis small">${NOMINATIONS.map((n) => `<div class="kpi"><b>${s.noms[n.id]}/${s.n}</b><span>${esc(n.award)}</span></div>`).join('')}</div>
+      </section>` : ''}
       <section class="card"><h3>Observaciones de los jueces</h3>
         ${obsByArea.map(({ f, items }) => `
           <div class="obs-group"><h4>${esc(f.area)}</h4>
@@ -1045,7 +1041,6 @@
         <button class="btn" id="eq-add">+ Agregar equipo</button>
         <button class="btn ghost" id="eq-tpl">Descargar plantilla</button>
         <button class="btn" id="eq-print">Imprimir todos los QR</button>
-        <button class="btn" id="eq-voto">QR del voto del público</button>
         <input class="search" id="eq-q" placeholder="Buscar proyecto, grupo o integrante…">
       </div>
       <div id="eq-warn"></div>
@@ -1066,7 +1061,6 @@
       ['EcoRiego Inteligente', 'LAGE 5A', 'Sustentabilidad', 'Ana Pérez; Luis Gómez; María Soto', '1', 'Sistema de riego con sensores de humedad'],
     ]);
     $('#eq-print').onclick = () => printAllQR();
-    $('#eq-voto').onclick = () => qrDialog({ name: 'Voto del público', group: 'Escanea para votar', category: '' }, voteUrl(state.settings));
     $('#eq-q').oninput = () => currentTab.update();
     $('#eq-warn').addEventListener('click', (e) => {
       const b = e.target.closest('[data-ip]'); if (!b) return;
@@ -1102,7 +1096,7 @@
         const list = [...state.teams].sort((a, b) => a.name.localeCompare(b.name))
           .filter((t) => !q || norm([t.name, t.group, t.category, (t.members || []).join(' ')].join(' ')).includes(q));
         $('#eq-list').innerHTML = state.teams.length ? `
-          <div class="table-wrap"><table class="tbl"><thead><tr><th>Proyecto</th><th>Grupo</th><th>Categoría</th><th>Integrantes</th><th>Estado</th><th></th></tr></thead><tbody>
+          <div class="table-wrap"><table class="tbl team-tbl"><thead><tr><th>Proyecto</th><th>Grupo</th><th>Categoría</th><th>Integrantes</th><th>Estado</th><th></th></tr></thead><tbody>
           ${list.map((t) => `<tr>
             <td><b>${esc(t.name)}</b>${t.stand ? `<small>Stand ${esc(t.stand)}</small>` : ''}</td>
             <td>${esc(t.group)}</td><td><span class="chip">${esc(t.category || '–')}</span></td>
@@ -1175,23 +1169,25 @@
     const svg = qrSvg(url);
     const d = openDialog(`
       <div class="qr-modal">
+        ${oneLogo(programOf(state.settings), 'md')}
+        <p class="muted qr-event">${esc(state.settings.eventName)}</p>
         <div class="qr-big">${svg}</div>
         <h3>${esc(t.name)}</h3><p class="muted">${esc(teamLine(t))}</p>
         <input class="url" readonly value="${esc(url)}">
         <div class="row end"><button class="btn ghost" id="cpUrl">Copiar enlace</button><button class="btn" id="dlPng">Descargar PNG</button><button class="btn primary" data-close>Cerrar</button></div>
       </div>`);
     $('#cpUrl', d).onclick = () => navigator.clipboard.writeText(url).then(() => toast('Enlace copiado'), () => $('.url', d).select());
-    $('#dlPng', d).onclick = async () => downloadBlob(`qr-${slug(t.name)}.png`, await svgToPngBlob(svg));
+    $('#dlPng', d).onclick = async () => {
+      try { downloadBlob(`qr-${slug(t.group || '')}${t.group ? '-' : ''}${slug(t.name)}.png`, await qrCardPng(t, svg)); }
+      catch (ex) { toast('No se pudo crear la imagen: ' + ex.message, 'bad'); }
+    };
   }
 
   async function printAllQR() {
     if (!state.teams.length || !await loadQrLib()) return;
     const sheet = document.createElement('div'); sheet.id = 'print-sheet';
-    const voteCard = `
-      <div class="qr-card"><div class="qr-svg">${qrSvg(voteUrl(state.settings))}</div>
-        <b>Voto del público</b><span>Escanea y vota por tu proyecto favorito</span><small>${esc(state.settings.eventName)}</small></div>`;
-    sheet.innerHTML = voteCard + [...state.teams].sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name)).map((t) => `
-      <div class="qr-card"><div class="qr-svg">${qrSvg(teamUrl(state.settings, t))}</div>
+    sheet.innerHTML = [...state.teams].sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name)).map((t) => `
+      <div class="qr-card">${oneLogo(programOf(state.settings), '')}<div class="qr-svg">${qrSvg(teamUrl(state.settings, t))}</div>
         <b>${esc(t.name)}</b><span>${esc(teamLine(t))}</span><small>Escanea para evaluar · ${esc(state.settings.eventName)}</small></div>`).join('');
     document.body.appendChild(sheet);
     const clean = () => { sheet.remove(); window.removeEventListener('afterprint', clean); };
@@ -1311,7 +1307,7 @@
             <button type="button" class="btn" data-add="crit">+ Agregar criterio</button>
           </section>
           <section class="card"><h3>Premios por nominación</h3>
-            <p class="muted">Cada juez responde Sí o No; gana quien acumule más «Sí». El premio al mejor promedio y el del público siempre existen.</p>
+            <p class="muted">Cada juez responde Sí o No; gana quien acumule más «Sí». El premio al mejor promedio siempre existe.</p>
             ${draft.nominations.map((n, i) => `
               <div class="ed-item">
                 <div class="ed-head"><b>Premio ${i + 1}</b>${del(`nominations.${i}`, 'Quitar premio')}</div>
@@ -1356,7 +1352,7 @@
       if (errors.length) { box.innerHTML = errors.map(esc).join('<br>'); box.scrollIntoView({ block: 'center' }); return; }
       const n = state.evals.length;
       const clearAnswers = n > 0 && scoring(config) !== scoring(window.DD.current);
-      if (clearAnswers && !await confirmDialog(`Cambiaste puntos, niveles o criterios y hay ${answers(n)} calificada${n === 1 ? '' : 's'} con la rúbrica anterior. Para que los resultados sean correctos se ${n === 1 ? 'borrará' : 'borrarán'}. Los equipos, sus QR y los votos se conservan. No se puede deshacer.`, 'Borrar respuestas y guardar')) return;
+      if (clearAnswers && !await confirmDialog(`Cambiaste puntos, niveles o criterios y hay ${answers(n)} calificada${n === 1 ? '' : 's'} con la rúbrica anterior. Para que los resultados sean correctos se ${n === 1 ? 'borrará' : 'borrarán'}. Los equipos y sus QR se conservan. No se puede deshacer.`, 'Borrar respuestas y guardar')) return;
       try {
         await store.saveEventConfig(config);
       } catch (ex) { toast('No se pudo guardar: ' + ex.message, 'bad'); return; }
@@ -1404,11 +1400,11 @@
           <section class="card"><h3>Evaluación</h3>
             <form id="ajForm" class="stack-form">
               <label class="field"><span>Nombre de la evaluación</span><input name="eventName" value="${esc(s.eventName)}"></label>
+              ${programPicker(programOf(s))}
               <label class="field"><span>URL pública de esta página</span>
                 <small>Dirección donde publicaste el sistema (termina en <code>index.html</code> o en el dominio). Los QR se generan con ella. Déjala vacía para usar la dirección actual.</small>
                 <input name="baseUrl" placeholder="https://mi-demoday.web.app/" value="${esc(s.baseUrl)}"></label>
               <label class="check"><input type="checkbox" name="open" ${s.open ? 'checked' : ''}> Evaluaciones de jueces abiertas (desmárcalo al terminar el recorrido)</label>
-              <label class="check"><input type="checkbox" name="votingOpen" ${s.votingOpen ? 'checked' : ''}> Votación del público abierta (desmárcalo para cerrar el voto)</label>
               <div><button class="btn primary">Guardar ajustes</button></div>
             </form>
           </section>
@@ -1418,22 +1414,22 @@
                 : 'Modo demostración: los datos están solo en este navegador.'}</p>
             <div class="row">
               ${store.mode !== 'firebase' ? '<button class="btn" id="seedBtn">Cargar datos de demostración</button>' : ''}
-              <button class="btn danger" id="clearRespBtn">Borrar evaluaciones y votos</button>
+              <button class="btn danger" id="clearRespBtn">Borrar evaluaciones</button>
               <button class="btn danger" id="resetBtn">Borrar todo</button>
             </div>
-            <p class="muted">Solo afectan a esta evaluación. «Borrar evaluaciones y votos» conserva los equipos y sus QR: úsalo después de las pruebas. «Borrar todo» también elimina los equipos${state.eventId === DEFAULT_EVENT ? ' y los ajustes' : ''}.</p>
+            <p class="muted">Solo afectan a esta evaluación. «Borrar evaluaciones» conserva los equipos y sus QR: úsalo después de las pruebas. «Borrar todo» también elimina los equipos${state.eventId === DEFAULT_EVENT ? ' y los ajustes' : ''}.</p>
             ${state.eventId !== DEFAULT_EVENT ? '<div class="row"><button class="btn danger" id="delEventBtn">Eliminar esta evaluación</button></div>' : ''}
           </section>`;
         $('#ajForm').onsubmit = async (e) => {
           e.preventDefault(); const f = e.target;
           try {
-            await store.saveSettings({ eventName: f.eventName.value.trim() || s.eventName, baseUrl: f.baseUrl.value.trim(), open: f.open.checked, votingOpen: f.votingOpen.checked });
+            await store.saveSettings({ eventName: f.eventName.value.trim() || s.eventName, program: f.program.value, baseUrl: f.baseUrl.value.trim(), open: f.open.checked });
             await reloadEvents(); renderEventBar(); toast('Ajustes guardados');
           } catch (ex) { toast(ex.message, 'bad'); }
         };
         const delBtn = $('#delEventBtn');
         if (delBtn) delBtn.onclick = async () => {
-          if (!await confirmDialog(`¿Eliminar «${state.settings.eventName}» con sus equipos, evaluaciones y votos? Sus QR dejarán de funcionar. No se puede deshacer.`, 'Eliminar evaluación')) return;
+          if (!await confirmDialog(`¿Eliminar «${state.settings.eventName}» con sus equipos y evaluaciones? Sus QR dejarán de funcionar. No se puede deshacer.`, 'Eliminar evaluación')) return;
           try {
             const id = state.eventId;
             if (stopData) { stopData(); stopData = null; }
@@ -1446,11 +1442,11 @@
           try { await store.clearData(scope); toast(okMsg); } catch (ex) { toast('No se pudo borrar: ' + ex.message, 'bad'); }
         };
         $('#clearRespBtn').onclick = async () => {
-          const ne = state.evals.length, nv = state.votes.length;
-          if (await confirmDialog(`¿Borrar ${ne} ${ne === 1 ? 'evaluación' : 'evaluaciones'} y ${nv} ${nv === 1 ? 'voto' : 'votos'} ${where}? Los equipos y sus QR se conservan. No se puede deshacer.`, 'Borrar')) await run('responses', 'Evaluaciones y votos borrados');
+          const ne = state.evals.length;
+          if (await confirmDialog(`¿Borrar ${ne} ${ne === 1 ? 'evaluación' : 'evaluaciones'} ${where}? Los equipos y sus QR se conservan. No se puede deshacer.`, 'Borrar')) await run('responses', 'Evaluaciones borradas');
         };
         $('#resetBtn').onclick = async () => {
-          if (await confirmDialog(`¿Borrar TODO ${where}: equipos, evaluaciones, votos y ajustes? Los QR impresos dejarán de funcionar. No se puede deshacer.`, 'Borrar todo')) await run('all', 'Todos los datos borrados');
+          if (await confirmDialog(`¿Borrar TODO ${where}: equipos, evaluaciones y ajustes? Los QR impresos dejarán de funcionar. No se puede deshacer.`, 'Borrar todo')) await run('all', 'Todos los datos borrados');
         };
       },
     };

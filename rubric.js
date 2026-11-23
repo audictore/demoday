@@ -104,15 +104,13 @@
   // Categorías de navegación de la Guía Operativa (los equipos pueden traer otras).
   const CATEGORIES = ['Salud y Bienestar', 'Tecnología', 'Educación', 'Servicios', 'Sustentabilidad'];
 
-  // Premios. "negocio" por promedio; defensa/innovador/prototipo por nominaciones "Sí";
-  // "publico" por votos del QR general.
+  // Premios. "negocio" por promedio; defensa/innovador/prototipo por nominaciones "Sí".
   const AWARDS = [
     { id: 'negocio', name: 'Mejor Idea de Negocio', basis: 'Mayor promedio total en la rúbrica de 100 puntos', kind: 'promedio' },
     ...NOMINATIONS.map((n) => ({
       id: n.id, name: n.award, basis: 'Mayor acumulación de nominaciones "Sí"', kind: 'nominaciones',
       tieCriterion: n.tieCriterion,
     })),
-    { id: 'publico', name: 'Premio del Público', basis: 'Mayor número de votos del público (QR general)', kind: 'votos' },
   ];
 
   /* ---------- Evaluaciones configurables ----------
@@ -137,7 +135,6 @@
     const awards = [
       { id: 'negocio', name: overallAward, basis: `Mayor promedio total en la rúbrica de ${maxTotal} puntos`, kind: 'promedio' },
       ...nominations.map((n) => ({ id: n.id, name: n.award, basis: 'Mayor acumulación de nominaciones "Sí"', kind: 'nominaciones', tieCriterion: n.tieCriterion })),
-      AWARDS[AWARDS.length - 1],
     ];
     return { overallAward, rubric, nominations, feedback, categories: c.categories || [], maxTotal, awards };
   }

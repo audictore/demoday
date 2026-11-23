@@ -3,7 +3,6 @@
 Web estática (HTML + JS, sin compilar) que implementa la *Guía de evaluación* y la *Guía Operativa Demo Day Expo*:
 
 - **Cada equipo tiene un QR distinto** → abre la página del proyecto (integrantes, grupo, categoría) con la rúbrica de 100 pts, las 3 nominaciones Sí/No y las 4 preguntas de retroalimentación.
-- **Voto del público:** un **QR general** (`#/voto`, botón *QR del voto del público* en Equipos y QR; también sale en la hoja impresa) donde estudiantes y asistentes eligen su proyecto favorito.
 - **Panel de administrador** (`#/admin`): ganadores, estadísticas, puntos de mejora por equipo, observaciones, cobertura de jueces, equipos/QR y ajustes.
 
 ## Premios (según el PDF)
@@ -14,7 +13,6 @@ Web estática (HTML + JS, sin compilar) que implementa la *Guía de evaluación*
 | Mejor Defensa en Stand | Más nominaciones «Sí» | Promedio en «Calidad de la Defensa», luego promedio total |
 | Proyecto Más Innovador | Más nominaciones «Sí» | Promedio en «Innovación», luego promedio total |
 | Mejor Prototipo | Más nominaciones «Sí» | Promedio en «Desarrollo del Prototipo», luego promedio total |
-| Premio del Público | Más **votos** del QR general (1 por dispositivo, se puede cambiar mientras esté abierto) | Promedio total de la rúbrica |
 
 Cada premio muestra el ganador general, el top 5 y el ganador **por categoría** (Salud y Bienestar, Tecnología, Educación, Servicios, Sustentabilidad).
 
@@ -22,7 +20,7 @@ Cada premio muestra el ganador general, el top 5 y el ganador **por categoría**
 
 ## Evento sin internet: servidor en tu computadora (red local)
 
-No necesitas Firebase ni hosting. `serve.ps1` sirve la página **y guarda los datos** (en `data.json`) para que todos los celulares conectados a la misma red compartan evaluaciones y votos.
+No necesitas Firebase ni hosting. `serve.ps1` sirve la página **y guarda los datos** (en `data.json`) para que todos los celulares conectados a la misma red compartan las evaluaciones.
 
 1. **Red:** conecta la computadora y los celulares a la misma red. Si no hay router/Wi-Fi del lugar, activa en Windows **Configuración → Red e Internet → Zona con cobertura inalámbrica móvil** y conecta los celulares a esa red (no necesita internet).
 2. **Inicia el servidor**, en PowerShell dentro de esta carpeta:
@@ -66,30 +64,30 @@ Re-importar el mismo Excel actualiza los equipos existentes (mismo proyecto + gr
 
 - Juez escanea el QR → escribe nombre y correo (se recuerdan) → evalúa → «Enviar». Si vuelve a escanear el mismo stand con su correo, se cargan sus respuestas y puede corregirlas (cuenta una sola vez por proyecto).
 - **Ganadores** se actualiza en tiempo real. Vigila **Jueces → Participación** para ver qué equipos no tienen evaluaciones.
-- Tras el recorrido: **Ajustes → desmarcar «Evaluaciones de jueces abiertas»**. Tras los 20 min de votación del público: desmarcar **«Votación del público abierta»**. **Jueces → Exportar CSV** descarga todo.
-- Si cambias `firestore.rules`, vuelve a **publicarlas** en Firebase (incluyen la colección `votes` del voto del público).
+- Tras el recorrido: **Ajustes → desmarcar «Evaluaciones de jueces abiertas»**. **Jueces → Exportar CSV** descarga todo.
+- Si cambias `firestore.rules`, vuelve a **publicarlas** en Firebase.
 
 ## Varias evaluaciones
 
-Con Firebase, el panel maneja varias evaluaciones a la vez. Cada una tiene sus propios equipos, QR, respuestas, votos, resultados y ajustes de apertura.
+Con Firebase, el panel maneja varias evaluaciones a la vez. Cada una tiene sus propios equipos, QR, respuestas, resultados y ajustes de apertura.
 
 - **Crear:** en la barra **Evaluación**, pulsa **+ Nueva evaluación**. Puede copiar la evaluación abierta o empezar de una plantilla sencilla.
 - **Configurar:** en la pestaña **Rúbrica** se editan criterios, niveles, puntos, premios por nominación y preguntas abiertas. Se admiten de 3 a 8 criterios y hasta 1000 puntos.
-- **Proteger resultados:** con respuestas registradas se pueden cambiar textos, premios y preguntas sin afectarlas. Si cambias puntos, niveles o criterios, al guardar se pide confirmar y se borran las evaluaciones de esa rúbrica; equipos, QR y votos se conservan.
-- **QR:** el Demo Day conserva sus enlaces (`#/e/EQUIPO`). Las demás usan `#/e/EVALUACION/EQUIPO` y `#/voto/EVALUACION`.
+- **Proteger resultados:** con respuestas registradas se pueden cambiar textos, premios y preguntas sin afectarlas. Si cambias puntos, niveles o criterios, al guardar se pide confirmar y se borran las evaluaciones de esa rúbrica; equipos y QR se conservan.
+- **QR:** el Demo Day conserva sus enlaces (`#/e/EQUIPO`). Las demás usan `#/e/EVALUACION/EQUIPO`.
 - **Publicar:** esta función requiere las reglas actuales de `firestore.rules`. El servidor local (`serve.ps1`) sigue manejando una sola evaluación.
 
 ## Antes del evento: limpiar las pruebas
 
 En **Ajustes → Datos** (funciona en los tres modos: Firebase, servidor local y demostración):
-- **Borrar evaluaciones y votos:** deja los equipos, los QR impresos y los ajustes. Es lo que debes hacer después de probar, justo antes de abrir el evento real.
+- **Borrar evaluaciones:** deja los equipos, los QR impresos y los ajustes. Es lo que debes hacer después de probar, justo antes de abrir el evento real.
 - **Borrar todo:** elimina además equipos y ajustes (los QR impresos dejan de servir).
 
 Los dos botones piden confirmación y muestran cuántos registros se borrarán.
 
 ## Si un celular pierde la señal
 
-Cuando un juez o alguien del público envía una evaluación o un voto y no hay conexión, el envío **se guarda en su teléfono** y se reintenta solo (cada 6 segundos, al volver la señal y al reabrir el sitio). La pantalla muestra «Pendiente de enviar» y cambia a «Enviado» cuando llega. Es seguro reintentar: cada evaluación y voto tiene un identificador fijo, así que un reenvío solo lo sobrescribe. Si el servidor lo rechaza (por ejemplo, evaluaciones cerradas), no se reintenta y se avisa.
+Cuando un juez envía una evaluación y no hay conexión, el envío **se guarda en su teléfono** y se reintenta solo (cada 6 segundos, al volver la señal y al reabrir el sitio). La pantalla muestra «Pendiente de enviar» y cambia a «Enviado» cuando llega. Es seguro reintentar: cada evaluación tiene un identificador fijo, así que un reenvío solo lo sobrescribe. Si el servidor lo rechaza (por ejemplo, evaluaciones cerradas), no se reintenta y se avisa.
 
 ## Publicar cambios en GitHub
 
@@ -111,6 +109,6 @@ Nunca sube `data.json`. GitHub Pages se actualiza en ~1 minuto.
 - **Servidor local:** el tráfico va sin cifrar (HTTP) dentro de tu red; el PIN y los datos solo son tan privados como la red. Úsalo en una red de confianza (tu zona inalámbrica) y no lo expongas a internet.
 
 - La identidad del juez es nombre + correo sin verificación (decisión del proyecto): evita duplicados, pero no impide que alguien escriba un correo ajeno.
-- El voto del público se limita **por dispositivo** (identificador guardado en el navegador): quien borre los datos del navegador o use otro teléfono podría votar otra vez. Para un control estricto habría que pedir correo institucional.
-- Los premios por nominaciones «Sí» y por votos favorecen a los equipos que recibieron más evaluaciones o votos; en Estadísticas puedes ver cuántas evaluaciones tiene cada equipo.
+- Los premios por nominaciones «Sí» favorecen a los equipos que recibieron más evaluaciones; en Estadísticas puedes ver cuántas evaluaciones tiene cada equipo.
 - El capital virtual de $100,000 del PDF se quitó a petición del proyecto (no hay premio «Mayor Potencial Comercial»).
+- El voto del público también se quitó a petición del proyecto: solo califican los jueces. Los enlaces viejos `#/voto` muestran un aviso.

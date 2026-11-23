@@ -1,5 +1,5 @@
 ﻿# Servidor de red local del Demo Day (sin Node, sin Python, sin internet).
-# Sirve la página y guarda evaluaciones/votos en data.json para que TODOS los celulares
+# Sirve la página y guarda las evaluaciones en data.json para que TODOS los celulares
 # conectados a la misma red (Wi-Fi o "Zona con cobertura inalámbrica" de Windows) compartan los datos.
 #
 # Uso:  powershell -ExecutionPolicy Bypass -File serve.ps1 [-Port 8080] [-AdminPin 123456]
@@ -14,11 +14,11 @@ $root = $PSScriptRoot
 $dataFile = Join-Path $root 'data.json'
 $blocked = @('data.json', 'serve.ps1')
 
-$db = @{ teams = @{}; evals = @{}; votes = @{}; settings = @{}; pin = ''; rev = 0 }
+$db = @{ teams = @{}; evals = @{}; settings = @{}; pin = ''; rev = 0 }
 if (Test-Path $dataFile) {
   try {
     $o = $ser.DeserializeObject([IO.File]::ReadAllText($dataFile, $utf8))
-    foreach ($c in 'teams', 'evals', 'votes', 'settings') { if ($o[$c]) { foreach ($k in $o[$c].Keys) { $db[$c][$k] = $o[$c][$k] } } }
+    foreach ($c in 'teams', 'evals', 'settings') { if ($o[$c]) { foreach ($k in $o[$c].Keys) { $db[$c][$k] = $o[$c][$k] } } }
     if ($o['pin']) { $db.pin = [string]$o['pin'] }
     if ($o['rev']) { $db.rev = [int]$o['rev'] }
   } catch { Write-Host "No se pudo leer data.json: $($_.Exception.Message)" -ForegroundColor Yellow }
@@ -28,7 +28,7 @@ elseif (-not $db.pin) { $db.pin = (Get-Random -Minimum 100000 -Maximum 999999).T
 
 function Save-Db {
   $db.rev++
-  $json = $ser.Serialize(@{ teams = $db.teams; evals = $db.evals; votes = $db.votes; settings = $db.settings; pin = $db.pin; rev = $db.rev })
+  $json = $ser.Serialize(@{ teams = $db.teams; evals = $db.evals; settings = $db.settings; pin = $db.pin; rev = $db.rev })
   [IO.File]::WriteAllText($dataFile, $json, $utf8)
 }
 if (-not (Test-Path $dataFile) -or $AdminPin) { Save-Db }   # el PIN se conserva entre reinicios
@@ -104,12 +104,11 @@ function Handle-Api($stream, $req, $segs) {
       SendJson $stream 200 @($db.teams.Values); return
     }
     'GET eval' { if ($db.evals.ContainsKey($id)) { SendJson $stream 200 $db.evals[$id] } else { Fail $stream 404 'No existe' }; return }
-    'GET vote' { if ($db.votes.ContainsKey($id)) { SendJson $stream 200 $db.votes[$id] } else { Fail $stream 404 'No existe' }; return }
     'GET state' {
       if (& $needAdmin) { return }
       $since = -1; if ($req.query -match 'since=(-?\d+)') { $since = [int]$Matches[1] }
       if ($since -eq $db.rev) { SendJson $stream 200 @{ rev = $db.rev; changed = $false }; return }
-      SendJson $stream 200 @{ rev = $db.rev; changed = $true; teams = @($db.teams.Values); evals = @($db.evals.Values); votes = @($db.votes.Values); settings = $db.settings }; return
+      SendJson $stream 200 @{ rev = $db.rev; changed = $true; teams = @($db.teams.Values); evals = @($db.evals.Values); settings = $db.settings }; return
     }
     'PUT eval' {
       if (-not (Test-Id $id)) { Fail $stream 400 'Id inválido'; return }
@@ -119,13 +118,6 @@ function Handle-Api($stream, $req, $segs) {
       $t = $ev['total']; if (-not ($t -is [int] -or $t -is [decimal] -or $t -is [double]) -or $t -lt 0 -or $t -gt 100) { Fail $stream 400 'Total inválido'; return }
       if (-not $ev['judgeName'] -or -not $ev['scores']) { Fail $stream 400 'Faltan datos'; return }
       $db.evals[$id] = $ev; Save-Db; SendJson $stream 200 @{ ok = $true }; return
-    }
-    'PUT vote' {
-      if (-not (Test-Id $id) -or $id.Length -lt 8 -or $id.Length -gt 64) { Fail $stream 400 'Id inválido'; return }
-      if (Is-Closed 'votingOpen') { Fail $stream 403 'La votación está cerrada'; return }
-      $v = $ser.DeserializeObject($req.body)
-      if ($v['voterId'] -ne $id -or -not $db.teams.ContainsKey([string]$v['teamId'])) { Fail $stream 400 'Voto inválido'; return }
-      $db.votes[$id] = $v; Save-Db; SendJson $stream 200 @{ ok = $true }; return
     }
     'PUT teams' {
       if (& $needAdmin) { return }
@@ -146,7 +138,7 @@ function Handle-Api($stream, $req, $segs) {
     }
     'POST reset' {
       if (& $needAdmin) { return }
-      $db.evals = @{}; $db.votes = @{}
+      $db.evals = @{}
       if ($req.query -notmatch 'scope=responses') { $db.teams = @{}; $db.settings = @{} }
       Save-Db; SendJson $stream 200 @{ ok = $true }; return
     }

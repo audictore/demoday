@@ -9,15 +9,15 @@
   const judgeKeyOf = (email) => String(email || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
   const evalId = (teamId, judgeKey) => `${teamId}__${judgeKey}`;
   const newId = () => Math.random().toString(36).slice(2, 8);
-  const DEFAULT_SETTINGS = { open: true, votingOpen: true, baseUrl: '', eventName: 'Demo Day 2026' };
+  const DEFAULT_SETTINGS = { open: true, program: 'LAD', baseUrl: '', eventName: 'Demo Day 2026' };
   // El Demo Day original conserva sus colecciones y QR; cada evaluación nueva vive aparte (events/{id}/...).
   const DEFAULT_EVENT = window.DD.DEFAULT_EVENT;
 
   /* ------------------------------ LOCAL ------------------------------ */
   function createLocal() {
-    const K = { teams: 'dd_teams', evals: 'dd_evals', settings: 'dd_settings', votes: 'dd_votes' };
+    const K = { teams: 'dd_teams', evals: 'dd_evals', settings: 'dd_settings' };
     const EVENTS_KEY = 'dd_events';
-    const listeners = { teams: new Set(), evals: new Set(), settings: new Set(), votes: new Set() };
+    const listeners = { teams: new Set(), evals: new Set(), settings: new Set() };
     let scope = DEFAULT_EVENT;
     const keyOf = (k, ev = scope) => (ev === DEFAULT_EVENT ? K[k] : `dd_ev_${ev}_${k}`);
     const read = (k, d, ev = scope) => { try { return JSON.parse(localStorage.getItem(keyOf(k, ev))) ?? d; } catch (e) { return d; } };
@@ -48,12 +48,12 @@
       listEvents: async () => {
         const all = readEvents();
         const others = Object.keys(all).filter((id) => id !== DEFAULT_EVENT).sort((a, b) => all[a].createdAt - all[b].createdAt);
-        return [DEFAULT_EVENT, ...others].map((id) => ({ id, eventName: { ...DEFAULT_SETTINGS, ...read('settings', {}, id) }.eventName }));
+        return [DEFAULT_EVENT, ...others].map((id) => { const s = { ...DEFAULT_SETTINGS, ...read('settings', {}, id) }; return { id, eventName: s.eventName, program: s.program }; });
       },
-      createEvent: async (eventName, config) => {
+      createEvent: async (eventName, config, program = 'LAD') => {
         const id = window.DD.randomId('ev'); const all = readEvents();
         all[id] = { config, createdAt: Date.now() }; writeEvents(all);
-        write('settings', { eventName }, id);
+        write('settings', { eventName, program }, id);
         return id;
       },
       saveEventConfig: async (config) => { const all = readEvents(); all[scope] = { createdAt: Date.now(), ...all[scope], config }; writeEvents(all); },
@@ -64,10 +64,7 @@
       onTeams: sub('teams'),
       onEvaluations: sub('evals'),
       onSettings: sub('settings'),
-      onVotes: sub('votes'),
       getTeams: async () => Object.values(read('teams', {})),
-      getVote: async (id) => read('votes', {})[id] || null,
-      saveVote: async (v) => { const ev = v.eventId || DEFAULT_EVENT; const all = read('votes', {}, ev); all[v.id] = v; write('votes', all, ev); },
       getTeam: async (id) => read('teams', {})[id] || null,
       getSettings: async () => snapshot('settings'),
       getEvaluation: async (teamId, jk) => read('evals', {})[evalId(teamId, jk)] || null,
@@ -81,10 +78,10 @@
         onChange: (cb) => { cb({ email: 'modo-demostracion' }); return () => {}; },
         signIn: async () => {}, signOut: async () => {},
       },
-      // what 'evaluations': solo evaluaciones. 'responses': evaluaciones y votos (conserva equipos y ajustes). 'all': todo.
+      // what 'evaluations' o 'responses': solo evaluaciones (conserva equipos y ajustes). 'all': todo.
       clearData: async (what) => {
         // En una evaluación adicional, "todo" conserva su nombre y su rúbrica.
-        const keys = what === 'evaluations' ? ['evals'] : what === 'responses' ? ['evals', 'votes'] : scope === DEFAULT_EVENT ? Object.keys(K) : ['teams', 'evals', 'votes'];
+        const keys = what === 'evaluations' || what === 'responses' ? ['evals'] : scope === DEFAULT_EVENT ? Object.keys(K) : ['teams', 'evals'];
         keys.forEach((k) => localStorage.removeItem(keyOf(k))); keys.forEach(emit);
       },
       resetLocal: async () => { Object.keys(K).forEach((k) => localStorage.removeItem(keyOf(k))); Object.keys(K).forEach(emit); },
@@ -122,7 +119,7 @@
       }
     };
     // init se puede llamar muchas veces (cada vista lo hace): solo inicializa una vez.
-    // Jueces y público solo necesitan Firestore; el inicio de sesión se carga aparte en initAdmin.
+    // Los jueces solo necesitan Firestore; el inicio de sesión se carga aparte en initAdmin.
     const init = () => ready || (ready = (async () => {
       await sdk('firebase-app-compat.js');
       await sdk('firebase-firestore-compat.js');
@@ -150,15 +147,17 @@
       listEvents: async () => {
         const [main, snap] = await Promise.all([db.collection('settings').doc('event').get(), db.collection('events').get()]);
         const others = docs(snap).filter((e) => e.id !== DEFAULT_EVENT).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-        return [{ id: DEFAULT_EVENT, eventName: { ...DEFAULT_SETTINGS, ...(main.exists ? main.data() : {}) }.eventName }, ...others.map((e) => ({ id: e.id, eventName: e.eventName }))];
+        const m = { ...DEFAULT_SETTINGS, ...(main.exists ? main.data() : {}) };
+        return [{ id: DEFAULT_EVENT, eventName: m.eventName, program: m.program }, ...others.map((e) => ({ id: e.id, eventName: e.eventName, program: e.program || 'LAD' }))];
       },
-      createEvent: async (eventName, config) => {
+      createEvent: async (eventName, config, program = 'LAD') => {
         const id = window.DD.randomId('ev');
-        await eventRef(id).set({ eventName, open: true, votingOpen: true, baseUrl: '', config, createdAt: Date.now() });
+        await eventRef(id).set({ eventName, program, open: true, baseUrl: '', config, createdAt: Date.now() });
         return id;
       },
       saveEventConfig: (config) => eventRef().set({ config }, { merge: true }),
       deleteEvent: async (id) => {
+        // También limpia los votos que hayan quedado de cuando existía el voto del público.
         await wipe('evaluations', id); await wipe('votes', id); await wipe('teams', id);
         await eventRef(id).delete();
       },
@@ -174,10 +173,7 @@
       onTeams: (cb) => col('teams').onSnapshot((s) => cb(docs(s)), (e) => console.error('teams', e)),
       onEvaluations: (cb, onErr) => col('evaluations').onSnapshot((s) => cb(docs(s)), onErr || ((e) => console.error('evaluations', e))),
       onSettings: (cb) => settingsRef().onSnapshot((s) => cb({ ...DEFAULT_SETTINGS, ...(s.exists ? s.data() : {}) })),
-      onVotes: (cb, onErr) => col('votes').onSnapshot((s) => cb(docs(s)), onErr || ((e) => console.error('votes', e))),
       getTeams: async () => docs(await col('teams').get()),
-      getVote: async (id) => { const s = await col('votes').doc(id).get(); return s.exists ? { ...s.data(), id: s.id } : null; },
-      saveVote: (v) => col('votes', v.eventId || DEFAULT_EVENT).doc(v.id).set(v),
       getTeam: async (id) => { const s = await col('teams').doc(id).get(); return s.exists ? { ...s.data(), id: s.id } : null; },
       getSettings: async () => { const s = await settingsRef().get(); return { ...DEFAULT_SETTINGS, ...(s.exists ? s.data() : {}) }; },
       getEvaluation: async (teamId, jk) => {
@@ -236,7 +232,7 @@
     }
 
     // Sondeo único compartido por todas las suscripciones del panel de administrador.
-    const subs = { teams: new Set(), evals: new Set(), votes: new Set(), settings: new Set() };
+    const subs = { teams: new Set(), evals: new Set(), settings: new Set() };
     const errCbs = new Set();
     let cache = null, rev = -1, timer = null, failing = false;
     const slice = (k) => (k === 'settings' ? { ...DEFAULT_SETTINGS, ...cache.settings } : cache[k]);
@@ -274,14 +270,12 @@
       eventField: () => ({}),
       getEventInfo: async () => ({ id: DEFAULT_EVENT, config: null }),
       listEvents: async () => [],
-      onTeams: sub('teams'), onEvaluations: sub('evals'), onVotes: sub('votes'), onSettings: sub('settings'),
+      onTeams: sub('teams'), onEvaluations: sub('evals'), onSettings: sub('settings'),
       getTeam: (id) => api('GET', 'teams/' + id),
       getTeams: async () => (await api('GET', 'teams')) || [],
       getSettings: async () => ({ ...DEFAULT_SETTINGS, ...((await api('GET', 'settings')) || {}) }),
       getEvaluation: (teamId, jk) => api('GET', 'eval/' + evalId(teamId, jk)),
-      getVote: (id) => api('GET', 'vote/' + id),
       saveEvaluation: (ev) => api('PUT', 'eval/' + ev.id, ev),
-      saveVote: (v) => api('PUT', 'vote/' + v.id, v),
       deleteEvaluation: (id) => withKick(api('DELETE', 'eval/' + id, undefined, true)),
       saveTeam: (t) => withKick(api('PUT', 'teams/' + t.id, t, true)),
       saveTeams: (list) => withKick(api('POST', 'teams/bulk', list, true)),

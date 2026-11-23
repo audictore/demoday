@@ -1,19 +1,20 @@
-/* Cola de envíos pendientes: si un celular pierde la señal al enviar una evaluación o un voto,
+/* Cola de envíos pendientes: si un celular pierde la señal al enviar una evaluación,
    el envío se guarda en el teléfono y se reintenta solo hasta que llegue. Es seguro reintentar:
-   cada evaluación/voto tiene un id fijo, así que enviarlo dos veces solo lo sobrescribe. */
+   cada evaluación tiene un id fijo, así que enviarlo dos veces solo lo sobrescribe. */
 (function () {
   const KEY = 'dd_outbox';
   const RETRY_MS = 6000, TIMEOUT_MS = 12000;
   const listeners = new Set();
   let timer = null, flushing = false;
 
-  const read = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } };
+  // Solo hay evaluaciones; los votos que quedaron guardados de versiones anteriores se descartan.
+  const read = () => { try { return (JSON.parse(localStorage.getItem(KEY)) || []).filter((x) => x.kind === 'eval'); } catch (e) { return []; } };
   const write = (list) => {
     try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { /* sin almacenamiento */ }
     listeners.forEach((f) => f(list.length));
     schedule(list.length);
   };
-  // Un mismo teléfono puede votar en varias evaluaciones: el envío se identifica también por su evaluación.
+  // Un mismo teléfono puede enviar a varias evaluaciones: el envío se identifica también por su evaluación.
   const same = (x, kind, doc) => x.kind === kind && x.doc.id === doc.id && (x.doc.eventId || '') === (doc.eventId || '');
 
   // Errores de red/tiempo se reintentan; los demás (evaluaciones cerradas, datos inválidos) no.
@@ -28,7 +29,7 @@
   async function send(item) {
     const store = window.DD.store;
     await store.init();
-    return item.kind === 'eval' ? store.saveEvaluation(item.doc) : store.saveVote(item.doc);
+    return store.saveEvaluation(item.doc);
   }
 
   function remove(kind, doc) {

@@ -684,26 +684,71 @@
       if (cur && !(await confirmDialog('¿Cerrar las evaluaciones de los jueces? Nadie podrá enviar más hasta que las reabras.', 'Cerrar'))) return;
       try { await store.saveSettings({ [key]: !cur }); toast(cur ? 'Cerrado' : 'Reabierto'); } catch (ex) { toast(ex.message, 'bad'); }
     });
+    // La entrada animada se repite mientras siguen llegando datos justo después de abrir la pestaña;
+    // después, las actualizaciones en vivo solo resaltan lo que cambió.
+    const mountedAt = performance.now();
+    let prevLeaders = null, prevKpis = null;
     return {
       update() {
         const d = derived(); const g = d.global;
         const body = $('#g-body');
+        body.classList.remove('win-in');
         if (!state.teams.length) { body.innerHTML = `${errBanner()}${eventStatusHtml()}<div class="card"><h2>Aún no hay equipos</h2><p>Ve a <b>Equipos y QR</b> para importar la lista y generar los códigos.</p></div>`; return; }
         const missing = g.teams - g.teamsEvaluated;
         const wins = A.winners(d.stats, d.cats);
+        const kpi = (i, v, label) => `<div class="kpi" style="--i:${i}"><b>${v}</b><span>${label}</span></div>`;
         body.innerHTML = `
           ${errBanner()}
           ${eventStatusHtml()}
           <div class="kpis">
-            <div class="kpi"><b>${g.teams}</b><span>Equipos</span></div>
-            <div class="kpi"><b>${g.evaluations}</b><span>Evaluaciones</span></div>
-            <div class="kpi"><b>${g.judges}</b><span>Jueces</span></div>
-            <div class="kpi"><b>${g.evaluations ? fmt(g.avgTotal) : '–'}</b><span>Promedio global /${MAX_TOTAL}</span></div>
+            ${kpi(0, g.teams, 'Equipos')}
+            ${kpi(1, g.evaluations, 'Evaluaciones')}
+            ${kpi(2, g.judges, 'Jueces')}
+            ${kpi(3, g.evaluations ? fmt(g.avgTotal) : '–', `Promedio global /${MAX_TOTAL}`)}
           </div>
           ${missing > 0 ? `<div class="banner">${missing} equipo${missing === 1 ? '' : 's'} aún sin evaluaciones: ${esc(d.stats.filter((s) => !s.n).map((s) => s.team.name).slice(0, 6).join(', '))}${missing > 6 ? '…' : ''}.</div>` : ''}
-          <div class="awards">${wins.map((w) => awardCard(w)).join('')}</div>`;
+          <div class="awards">${wins.map((w, i) => awardCard(w, i)).join('')}</div>`;
+
+        const leaders = wins.map((w) => (w.overall.winner ? w.overall.winner.s.team.id : ''));
+        const kpis = $$('.kpi b', body).map((b) => b.textContent);
+        const entering = performance.now() - mountedAt < 1500;
+        if (entering && !reducedMotion()) {
+          body.classList.add('win-in');
+          countUp(body);
+        } else if (prevLeaders && !reducedMotion()) {
+          $$('.award', body).forEach((card, i) => { if (leaders[i] && leaders[i] !== prevLeaders[i]) card.querySelector('.winner').classList.add('lead-change'); });
+          $$('.kpi b', body).forEach((b, i) => { if (prevKpis && kpis[i] !== prevKpis[i]) b.classList.add('bump'); });
+        }
+        prevLeaders = leaders; prevKpis = kpis;
       },
     };
+  }
+
+  const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /** Cuenta desde 0 hasta el valor de las cifras de Ganadores (KPI, puntaje del ganador y lista). */
+  let countToken = 0;
+  function countUp(root) {
+    const items = $$('.kpi b, .winner .metric, .toplist .val', root).map((el) => {
+      const tn = el.firstChild;
+      const m = tn && tn.nodeType === 3 && tn.nodeValue.match(/^(\s*)(\d+(?:\.\d+)?)([\s\S]*)$/);
+      if (!m) return null;
+      const dec = (m[2].split('.')[1] || '').length;
+      // "1 nominaciones" se leería raro a medio conteo: el texto con unidades solo cuenta si es puntaje.
+      if (el.classList.contains('metric') && !dec) return null;
+      return { tn, pre: m[1], to: +m[2], dec, suf: m[3] };
+    }).filter(Boolean);
+    if (!items.length) return;
+    const paint = (e) => items.forEach((it) => { it.tn.nodeValue = it.pre + (it.to * e).toFixed(it.dec) + it.suf; });
+    paint(0);
+    const token = ++countToken, start = performance.now(), delay = 350, dur = 1100;
+    const frame = (now) => {
+      if (token !== countToken) return;
+      const t = Math.max(0, Math.min(1, (now - start - delay) / dur));
+      paint(easeOut(t));
+      if (t < 1) requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
   }
 
   function tieNote(award, res) {
@@ -717,21 +762,21 @@
     return `<p class="tie full">EMPATE sin resolver entre ${names}: requiere deliberación de los docentes.</p>`;
   }
 
-  function awardCard({ award, overall, byCategory }) {
+  function awardCard({ award, overall, byCategory }, i = 0) {
     const w = overall.winner;
     const top = overall.rows.slice(0, 5);
     const maxP = Math.max(1, ...top.map((r) => r.primary));
     return `
-      <section class="card award">
-        <div class="award-head"><span class="trophy">🏆</span><div><h3>${esc(award.name)}</h3><p class="muted">${esc(award.basis)}</p></div></div>
+      <section class="card award" style="--i:${i}">
+        <div class="award-head"><span class="trophy" aria-hidden="true">🏆</span><div><h3>${esc(award.name)}</h3><p class="muted">${esc(award.basis)}</p></div></div>
         ${w ? `
           <div class="winner">
             <div><b>${esc(w.s.team.name)}</b><span>${esc(w.s.team.group || '')} · ${esc(w.s.team.category || '')}</span></div>
             <div class="metric">${metricTxt(award, w)}<small>${awardSub(award, w)}</small></div>
           </div>
           ${tieNote(award, overall)}
-          <ol class="toplist">${top.map((r) => `
-            <li><span class="nm">${esc(r.s.team.name)}</span>
+          <ol class="toplist">${top.map((r, k) => `
+            <li style="--r:${k}"><span class="nm">${esc(r.s.team.name)}</span>
               <div class="bar"><i style="width:${Math.round((r.primary / (award.kind === 'promedio' ? MAX_TOTAL : maxP)) * 100)}%"></i></div>
               <span class="val">${awardVal(award, r.primary)}</span></li>`).join('')}</ol>
           <details><summary>Ganador por categoría</summary>
